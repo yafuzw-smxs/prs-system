@@ -22,7 +22,7 @@ async function init() {
       id        INTEGER PRIMARY KEY AUTOINCREMENT,
       username  TEXT    NOT NULL UNIQUE COLLATE NOCASE,
       password  TEXT    NOT NULL,
-      created   TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+      created   TEXT    NOT NULL DEFAULT (datetime('now','+8 hours'))
     );
     CREATE TABLE IF NOT EXISTS operation_logs (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,14 +32,14 @@ async function init() {
       table_name TEXT    DEFAULT '',
       op_type    TEXT    NOT NULL,
       detail     TEXT    DEFAULT '',
-      created    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+      created    TEXT    NOT NULL DEFAULT (datetime('now','+8 hours'))
     );
   `);
   db.run(`
     CREATE TABLE IF NOT EXISTS shared_tables (
       id         INTEGER PRIMARY KEY CHECK (id = 1),
       data       TEXT    NOT NULL DEFAULT '[]',
-      updated_at TEXT    DEFAULT (datetime('now','localtime')),
+      updated_at TEXT    DEFAULT (datetime('now','+8 hours')),
       updated_by TEXT    DEFAULT ''
     );
   `);
@@ -146,7 +146,7 @@ function getTables() {
 }
 
 function saveTables(tablesJson, username) {
-  db.run("UPDATE shared_tables SET data = ?, updated_at = datetime('now','localtime'), updated_by = ? WHERE id = 1",
+  db.run("UPDATE shared_tables SET data = ?, updated_at = datetime('now','+8 hours'), updated_by = ? WHERE id = 1",
     [tablesJson, username || '']);
   save();
 }

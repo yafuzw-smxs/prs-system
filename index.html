@@ -536,49 +536,55 @@ var _BUILTIN_TABLES=[
   }
 
   // load from backend (async), fallback to localStorage then builtins
+  // Backend is source of truth. Do NOT fallback to localStorage when authenticated,
+  // to avoid one user's stale local cache overwriting another user's data.
+  let _loadedFromBackend = false;
   async function load(){
+    _loadedFromBackend = false;
     if (_auth) {
       try {
         const res = await fetch('/api/tables', {headers: authHeaders()});
         if (res.ok) {
           const {tables} = await res.json();
-          if (tables && tables.length) {
-            state.tables = tables;
-            _rebuildIndex();
-            // Also cache locally as fallback
-            try { localStorage.setItem(LS_KEY, JSON.stringify(tables)); } catch(e){}
-            return;
-          }
-        }
-      } catch(e) { /* network error, fallback */ }
-    }
-    // Fallback: localStorage
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) {
-        const saved = JSON.parse(raw);
-        if (saved && saved.length) {
-          state.tables = saved;
+          _loadedFromBackend = true;
+          state.tables = (tables && tables.length) ? tables : JSON.parse(JSON.stringify(_BUILTIN_TABLES));
           _rebuildIndex();
+          // If backend was empty, seed with built-in tables (will push to backend on first save)
+          if (!tables || !tables.length) {
+            scheduleSave();
+          }
           return;
         }
+        // Non-OK response (401, 500) — DO NOT use local fallback, abort with empty
+        console.warn('加载表格失败：HTTP', res.status);
+        state.tables = [];
+        _rebuildIndex();
+        return;
+      } catch(e) {
+        // Network error — show empty, don't overwrite backend with local cache
+        console.warn('加载表格失败（网络错误）:', e.message);
+        state.tables = [];
+        _rebuildIndex();
+        return;
       }
-    } catch(e) {}
+    }
+    // Not logged in — use built-in demo data only, never touch backend
     state.tables = JSON.parse(JSON.stringify(_BUILTIN_TABLES));
     _rebuildIndex();
   }
 
   function save(){
-    // Save to localStorage (immediate, sync)
-    try { localStorage.setItem(LS_KEY, JSON.stringify(state.tables)); } catch(e) {}
-    // Save to backend (async, fire-and-forget)
-    if (_auth) {
-      fetch('/api/tables', {
-        method: 'PUT',
-        headers: authHeaders(),
-        body: JSON.stringify({tables: state.tables})
-      }).catch(() => {});
+    // Only save to backend if we successfully loaded from backend first.
+    // This prevents pushing stale local data that would overwrite other users' changes.
+    if (!_auth || !_loadedFromBackend) {
+      _dirty = false;
+      return;
     }
+    fetch('/api/tables', {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({tables: state.tables})
+    }).catch(() => {});
     _dirty = false;
   }
 
