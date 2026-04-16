@@ -278,7 +278,7 @@ select.ksel:focus{outline:none;border-color:var(--text)}
     </div>
     <!-- LOGS VIEW -->
     <div id="view-logs" style="display:none;height:100%;overflow-y:auto">
-      <div class="topbar"><div><div class="topbar-title">操作日志</div><div class="topbar-sub">查看所有用户的操作记录</div></div></div>
+      <div class="topbar"><div><div class="topbar-title">操作日志</div><div class="topbar-sub">查看所有用户的操作记录</div></div><button class="btn" onclick="downloadBackup()" style="margin-left:auto">💾 下载数据备份</button></div>
       <div class="content">
         <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center">
           <select class="ksel" id="log-table-sel" onchange="renderLogs(true)"><option value="">全部表格</option></select>
@@ -1794,6 +1794,21 @@ var _BUILTIN_TABLES=[
   const OP_LABELS = {import_table:'导入表格',delete_table:'删除表格',edit_cell:'编辑单元格',add_row:'新增行',delete_row:'删除行',add_column:'新增列',delete_column:'删除列'};
   const OP_BADGE  = {import_table:'imp',delete_table:'del',edit_cell:'edit',add_row:'add',delete_row:'del',add_column:'col',delete_column:'col'};
   let _logOffset = 0;
+
+  window.downloadBackup = async function(){
+    if(!_auth) return;
+    try {
+      const res = await fetch('/api/backup', {headers: authHeaders()});
+      if(!res.ok){ alert('下载失败'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'prs-backup-' + new Date().toISOString().slice(0,10) + '.db';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch(e){ alert('下载失败：' + e.message); }
+  };
 
   function populateLogTableSelect(){
     const sel = document.getElementById('log-table-sel');
