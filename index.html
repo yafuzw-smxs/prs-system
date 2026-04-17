@@ -399,7 +399,7 @@ var _BUILTIN_TABLES=[
     byId: new Map(),
     ui: {
       view: 'tables',
-      kw: { tableId: null, sheetIds: null, search: '' }
+      kw: { tableId: null, sheetIds: null, search: '', rankLimit: 20 }
     }
   };
 
@@ -911,13 +911,25 @@ var _BUILTIN_TABLES=[
 
     let rankHtml = '';
     if (agg.rankings.length) {
+      const limit = state.ui.kw.rankLimit || 20;
+      const shown = agg.rankings.slice(0, limit);
       const parts = [];
-      for (let i = 0; i < agg.rankings.length; i++) {
-        const g = agg.rankings[i];
+      for (let i = 0; i < shown.length; i++) {
+        const g = shown[i];
         const info = '综合评分 ' + g.score;
         parts.push('<div class="rank-row"><span class="idx">#' + (i + 1) + '</span><span class="name">' + escH(g.name) + '</span><span class="info">' + escH(info) + '</span></div>');
       }
-      rankHtml = '<div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border)"><div class="kw-sub-title">游戏评分排名</div><div class="rank-list">' + parts.join('') + '</div></div>';
+      const total = agg.rankings.length;
+      const selectOpts = [20, 50, 100].map(n =>
+        '<option value="' + n + '"' + (limit === n ? ' selected' : '') + '>前 ' + n + ' 款</option>'
+      ).join('');
+      const headerRow = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
+        + '<div class="kw-sub-title" style="margin:0">游戏评分排名</div>'
+        + '<div style="display:flex;align-items:center;gap:10px">'
+        +   '<span style="font-size:11px;color:var(--text3)">显示 ' + shown.length + ' / ' + total + '</span>'
+        +   '<select class="ksel" id="kw-rank-limit" onchange="window.__prs.setRankLimit(this.value)" style="padding:5px 22px 5px 10px;font-size:12px">' + selectOpts + '</select>'
+        + '</div></div>';
+      rankHtml = '<div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border)">' + headerRow + '<div class="rank-list">' + parts.join('') + '</div></div>';
     }
 
     body.innerHTML =
@@ -1862,7 +1874,11 @@ var _BUILTIN_TABLES=[
   }
 
   // Exposed for developer console / legacy (no longer needed by UI)
-  window.__prs = { state, bus, update, openTable, switchView };
+  function setRankLimit(n) {
+    state.ui.kw.rankLimit = parseInt(n, 10) || 20;
+    renderKw();
+  }
+  window.__prs = { state, bus, update, openTable, switchView, setRankLimit };
 })();
 </script>
 </body>
