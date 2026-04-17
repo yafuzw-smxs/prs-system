@@ -151,4 +151,17 @@ function saveTables(tablesJson, username) {
   save();
 }
 
-module.exports = { init, findUser, findUserById, createUser, insertLog, getLogs, save, getTables, saveTables };
+// 清理超过 7 天的操作日志
+// 返回删除的条数
+function cleanupOldLogs() {
+  // 先查出要删除的数量
+  const r = db.exec("SELECT COUNT(*) FROM operation_logs WHERE created < datetime('now','+8 hours','-7 days')");
+  const count = r.length ? r[0].values[0][0] : 0;
+  if (count > 0) {
+    db.run("DELETE FROM operation_logs WHERE created < datetime('now','+8 hours','-7 days')");
+    save();
+  }
+  return count;
+}
+
+module.exports = { init, findUser, findUserById, createUser, insertLog, getLogs, save, getTables, saveTables, cleanupOldLogs };

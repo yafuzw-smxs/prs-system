@@ -104,6 +104,17 @@ function runBackup() {
 setTimeout(runBackup, 5000);
 setInterval(runBackup, 24 * 60 * 60 * 1000);
 
+// ── Auto cleanup old logs (older than 7 days) ──
+function runLogCleanup() {
+  try {
+    const deleted = db.cleanupOldLogs();
+    if (deleted > 0) console.log(`[日志清理] 已删除 ${deleted} 条超过 7 天的日志`);
+  } catch (e) { console.error('[日志清理] 失败:', e.message); }
+}
+// Run on startup and every 6 hours
+setTimeout(runLogCleanup, 8000);
+setInterval(runLogCleanup, 6 * 60 * 60 * 1000);
+
 // ── API: Manual backup download ──
 app.get('/api/backup', authMiddleware, (req, res) => {
   db.save(); // flush to disk first
