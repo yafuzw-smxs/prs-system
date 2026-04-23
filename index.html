@@ -226,7 +226,10 @@ select.ksel:focus{outline:none;border-color:var(--text)}
         <button class="nav-item" id="nav-logs" data-view="logs"><span style="width:18px;text-align:center">☰</span> 操作日志</button>
       </div>
     </nav>
-    <div class="sidebar-footer"><div class="sidebar-user"><span id="sidebar-username">v2.7</span><button id="btn-logout" onclick="doLogout()" style="display:none">退出</button></div></div>
+    <div class="sidebar-footer">
+      <div style="padding:4px 16px 2px;font-size:11px;transition:opacity .5s" id="save-status" style="opacity:0"></div>
+      <div class="sidebar-user"><span id="sidebar-username">v2.7</span><button id="btn-logout" onclick="doLogout()" style="display:none">退出</button></div>
+    </div>
   </aside>
   <div class="main">
     <div id="view-tables">
@@ -573,21 +576,35 @@ var _BUILTIN_TABLES=[
     _rebuildIndex();
   }
 
+  function _showSaveStatus(ok){
+    let el = document.getElementById('save-status');
+    if(!el) return;
+    clearTimeout(el._t);
+    el.textContent = ok ? '✓ 已保存' : '✗ 保存失败，请刷新重试';
+    el.style.color = ok ? '#22c55e' : '#ef4444';
+    el.style.opacity = '1';
+    el._t = setTimeout(() => { el.style.opacity = '0'; }, ok ? 2000 : 5000);
+  }
+
   function save(){
     // Only save to backend if we successfully loaded from backend first.
     // This prevents pushing stale local data that would overwrite other users' changes.
     if (!_auth || !_loadedFromBackend) {
       _dirty = false;
-      return;
+      return Promise.resolve();
     }
-    // keepalive:true lets the request complete even if the page is closing/refreshing
-    fetch('/api/tables', {
+    _dirty = false;
+    return fetch('/api/tables', {
       method: 'PUT',
       headers: authHeaders(),
-      body: JSON.stringify({tables: state.tables}),
-      keepalive: true
-    }).catch(() => {});
-    _dirty = false;
+      body: JSON.stringify({tables: state.tables})
+    }).then(res => {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      _showSaveStatus(true);
+    }).catch(err => {
+      console.error('[save] failed:', err);
+      _showSaveStatus(false);
+    });
   }
 
   function scheduleSave(){
@@ -1679,10 +1696,11 @@ var _BUILTIN_TABLES=[
             sheets: newSheets
           };
           update(ts => ts.push(newTable));
-          save(); // immediate save — don't wait for debounce
           closeModal();
           logOp('import_table', newTable.id, tableName, newSheets.length + ' sheets, ' + totalRows + ' rows');
-          alert('成功导入「' + tableName + '」\n共 ' + newSheets.length + ' 个工作表，' + totalRows + ' 条数据！');
+          save().then(() => {
+            alert('成功导入「' + tableName + '」\n共 ' + newSheets.length + ' 个工作表，' + totalRows + ' 条数据！');
+          });
         } catch (err) {
           alert('Excel 解析失败：' + err.message);
         }
@@ -1713,10 +1731,11 @@ var _BUILTIN_TABLES=[
           sheets: [{ id: 's' + Date.now(), name: 'Sheet1', columns: hd, data: rows }]
         };
         update(ts => ts.push(newTable));
-        save(); // immediate save — don't wait for debounce
         closeModal();
         logOp('import_table', newTable.id, tableName, rows.length + ' rows (CSV)');
-        alert('成功导入「' + tableName + '」，共 ' + rows.length + ' 条数据！');
+        save().then(() => {
+          alert('成功导入「' + tableName + '」，共 ' + rows.length + ' 条数据！');
+        });
       };
       rd.readAsText(f, 'utf-8');
     }
@@ -1747,7 +1766,7 @@ var _BUILTIN_TABLES=[
       const idx = ts.findIndex(x => x.id === id);
       if (idx >= 0) ts.splice(idx, 1);
     });
-    save(); // immediate save — don't wait for debounce
+    save(); // immediate save — don't rely on debounce
     logOp('delete_table', id, tName, '');
   }
 
