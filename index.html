@@ -580,10 +580,12 @@ var _BUILTIN_TABLES=[
       _dirty = false;
       return;
     }
+    // keepalive:true lets the request complete even if the page is closing/refreshing
     fetch('/api/tables', {
       method: 'PUT',
       headers: authHeaders(),
-      body: JSON.stringify({tables: state.tables})
+      body: JSON.stringify({tables: state.tables}),
+      keepalive: true
     }).catch(() => {});
     _dirty = false;
   }
@@ -1677,6 +1679,7 @@ var _BUILTIN_TABLES=[
             sheets: newSheets
           };
           update(ts => ts.push(newTable));
+          save(); // immediate save — don't wait for debounce
           closeModal();
           logOp('import_table', newTable.id, tableName, newSheets.length + ' sheets, ' + totalRows + ' rows');
           alert('成功导入「' + tableName + '」\n共 ' + newSheets.length + ' 个工作表，' + totalRows + ' 条数据！');
@@ -1710,6 +1713,7 @@ var _BUILTIN_TABLES=[
           sheets: [{ id: 's' + Date.now(), name: 'Sheet1', columns: hd, data: rows }]
         };
         update(ts => ts.push(newTable));
+        save(); // immediate save — don't wait for debounce
         closeModal();
         logOp('import_table', newTable.id, tableName, rows.length + ' rows (CSV)');
         alert('成功导入「' + tableName + '」，共 ' + rows.length + ' 条数据！');
@@ -1743,6 +1747,7 @@ var _BUILTIN_TABLES=[
       const idx = ts.findIndex(x => x.id === id);
       if (idx >= 0) ts.splice(idx, 1);
     });
+    save(); // immediate save — don't wait for debounce
     logOp('delete_table', id, tName, '');
   }
 
