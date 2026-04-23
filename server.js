@@ -68,6 +68,7 @@ app.get('/api/logs', authMiddleware, (req, res) => {
 // ── API: Get shared tables ──
 app.get('/api/tables', authMiddleware, (req, res) => {
   const result = db.getTables();
+  console.log(`[GET /api/tables] user=${req.user.username} tables=${result.tables.length} updatedBy=${result.updatedBy} updatedAt=${result.updatedAt}`);
   res.json(result);
 });
 
@@ -75,8 +76,14 @@ app.get('/api/tables', authMiddleware, (req, res) => {
 app.put('/api/tables', authMiddleware, (req, res) => {
   const { tables } = req.body || {};
   if (!Array.isArray(tables)) return res.status(400).json({ error: '无效数据' });
-  db.saveTables(JSON.stringify(tables), req.user.username);
-  res.json({ ok: true });
+  try {
+    db.saveTables(JSON.stringify(tables), req.user.username);
+    console.log(`[PUT /api/tables] user=${req.user.username} tables=${tables.length} bodyBytes=${JSON.stringify(tables).length}`);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(`[PUT /api/tables] ERROR user=${req.user.username}:`, e.message);
+    res.status(500).json({ error: '保存失败: ' + e.message });
+  }
 });
 
 // ── Auto Backup: daily backup, keep 7 days ──

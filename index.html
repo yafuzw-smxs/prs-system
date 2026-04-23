@@ -550,10 +550,12 @@ var _BUILTIN_TABLES=[
         if (res.ok) {
           const {tables} = await res.json();
           _loadedFromBackend = true;
+          console.log('[load] backend returned tables=' + (tables ? tables.length : 'null'));
           state.tables = (tables && tables.length) ? tables : JSON.parse(JSON.stringify(_BUILTIN_TABLES));
           _rebuildIndex();
           // If backend was empty, seed with built-in tables (will push to backend on first save)
           if (!tables || !tables.length) {
+            console.warn('[load] backend empty — seeding built-in tables');
             scheduleSave();
           }
           return;
@@ -576,34 +578,45 @@ var _BUILTIN_TABLES=[
     _rebuildIndex();
   }
 
-  function _showSaveStatus(ok){
+  function _showSaveStatus(ok, count){
     let el = document.getElementById('save-status');
     if(!el) return;
     clearTimeout(el._t);
-    el.textContent = ok ? '✓ 已保存' : '✗ 保存失败，请刷新重试';
-    el.style.color = ok ? '#22c55e' : '#ef4444';
+    const t = new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    if(ok){
+      el.textContent = '✓ 已保存 ' + count + ' 个表格 @ ' + t;
+      el.style.color = '#22c55e';
+    } else {
+      el.textContent = '✗ 保存失败！请截图此信息并反馈 @ ' + t;
+      el.style.color = '#ef4444';
+    }
     el.style.opacity = '1';
-    el._t = setTimeout(() => { el.style.opacity = '0'; }, ok ? 2000 : 5000);
+    // keep visible until next save (don't auto-hide)
   }
 
   function save(){
     // Only save to backend if we successfully loaded from backend first.
     // This prevents pushing stale local data that would overwrite other users' changes.
     if (!_auth || !_loadedFromBackend) {
+      console.warn('[save] skipped: auth=' + !!_auth + ' loadedFromBackend=' + _loadedFromBackend);
       _dirty = false;
       return Promise.resolve();
     }
+    const tableCount = state.tables.length;
+    const bodyStr = JSON.stringify({tables: state.tables});
+    console.log('[save] sending PUT tables=' + tableCount + ' bytes=' + bodyStr.length);
     _dirty = false;
     return fetch('/api/tables', {
       method: 'PUT',
       headers: authHeaders(),
-      body: JSON.stringify({tables: state.tables})
+      body: bodyStr
     }).then(res => {
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      _showSaveStatus(true);
+      console.log('[save] success tables=' + tableCount);
+      _showSaveStatus(true, tableCount);
     }).catch(err => {
-      console.error('[save] failed:', err);
-      _showSaveStatus(false);
+      console.error('[save] FAILED:', err);
+      _showSaveStatus(false, tableCount);
     });
   }
 
