@@ -1228,11 +1228,12 @@ var _BUILTIN_TABLES=[
           const r = consumeSheet.data[i];
           const name = String(r.B || '').trim();
           const raw = _parseNum(r[latestWk.col]);
-          const yuan = isNaN(raw) ? 0 : raw; // 周列直接以元为单位
+          const gpts = isNaN(raw) ? 0 : raw; // 单机周列单位：G点
+          const yuan = gpts / 10;            // G点÷10=元
           weekTotal += yuan;
-          // 下载量估算：元×10=G点，再除以单价(G点/个)
+          // 下载量估算：G点 ÷ 单价(G点/个)
           const price = _parseNum(r.F);
-          if (yuan > 0 && price > 0) weekDlTotal += Math.round((yuan * 10) / price);
+          if (gpts > 0 && price > 0) weekDlTotal += Math.round(gpts / price);
           if (name && yuan > 0) gameWeek.push({ name, amount: yuan });
         }
         out.standaloneWeeklyRevenue = weekTotal;
@@ -1241,7 +1242,7 @@ var _BUILTIN_TABLES=[
         out.standaloneWeeklyTop10 = gameWeek.slice(0, 10);
       }
 
-      // 本月销售额：累加本月所有周列（按最新周所在月份）
+      // 本月销售额：累加本月所有周列（G点÷10=元）
       if (weekCols.length) {
         const monthPfx = weekCols[weekCols.length - 1].date.substring(0, 6);
         out.standaloneMonthLabel = monthPfx.replace(/(\d{4})(\d{2})/, '$1年$2月');
@@ -1250,7 +1251,7 @@ var _BUILTIN_TABLES=[
         for (let i = 1; i < consumeSheet.data.length; i++) {
           for (const wc of monthWkCols) {
             const v = _parseNum(consumeSheet.data[i][wc.col]);
-            if (!isNaN(v)) monthTotal += v; // 周列直接以元为单位
+            if (!isNaN(v)) monthTotal += v / 10; // G点÷10=元
           }
         }
         out.standaloneMonthRevenue = monthTotal;
