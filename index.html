@@ -62,6 +62,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--text
 .card-count span{font-size:11px;color:var(--text3)}
 .card-sheets{display:flex;gap:4px;flex-wrap:wrap}
 .sheet-pill{font-size:10px;padding:2px 8px;border-radius:100px;background:var(--surface2);color:var(--text2);border:1px solid var(--border)}
+.card-upload-time{font-size:11px;color:var(--text3);margin-top:6px;display:flex;align-items:center;gap:4px}
 .card-actions{display:flex;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
 .card-act-btn{padding:4px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);cursor:pointer;font-size:12px;color:var(--text2);transition:all .12s}
 .card-act-btn:hover{background:var(--surface2);border-color:var(--border2)}
@@ -304,6 +305,7 @@ select.ksel:focus{outline:none;border-color:var(--text)}
       <div class="card-count"><strong></strong><span>条记录</span></div>
       <div class="card-sheets"></div>
     </div>
+    <div class="card-upload-time"><span>📅</span><span class="card-time-text"></span></div>
     <div class="card-actions">
       <button class="card-act-btn" data-action="color" title="修改颜色">🎨</button>
       <button class="card-act-btn" data-action="rename" title="重命名">✏</button>
@@ -754,6 +756,14 @@ var _BUILTIN_TABLES=[
       }
       node.querySelector('.card-count strong').textContent = total;
       node.querySelector('.card-sheets').appendChild(pillsFrag);
+      // Upload time: prefer t.createdAt, fall back to t.id (which is Date.now() at import)
+      const ts = t.createdAt || t.id;
+      if (ts) {
+        const d = new Date(ts);
+        const pad = n => String(n).padStart(2,'0');
+        const fmt = d.getFullYear()+'/'+pad(d.getMonth()+1)+'/'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+        node.querySelector('.card-time-text').textContent = '上传于 ' + fmt;
+      }
       frag.appendChild(node);
     }
     const importCard = document.createElement('div');
@@ -1702,6 +1712,7 @@ var _BUILTIN_TABLES=[
           const totalRows = newSheets.reduce((s, sh) => s + sh.data.length, 0);
           const newTable = {
             id: Date.now(),
+            createdAt: Date.now(),
             name: tableName,
             color: colors[state.tables.length % colors.length],
             icon: '📊',
@@ -1737,6 +1748,7 @@ var _BUILTIN_TABLES=[
         if (!rows.length) { alert('未读取到有效数据'); return; }
         const newTable = {
           id: Date.now(),
+          createdAt: Date.now(),
           name: tableName,
           color: colors[state.tables.length % colors.length],
           icon: '📊',
