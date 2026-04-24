@@ -1228,11 +1228,11 @@ var _BUILTIN_TABLES=[
           const r = consumeSheet.data[i];
           const name = String(r.B || '').trim();
           const raw = _parseNum(r[latestWk.col]);
-          const gpts = isNaN(raw) ? 0 : raw;
-          const yuan = gpts / 10;
+          const yuan = isNaN(raw) ? 0 : raw; // 周列直接以元为单位
           weekTotal += yuan;
+          // 下载量估算：元×10=G点，再除以单价(G点/个)
           const price = _parseNum(r.F);
-          if (gpts > 0 && price > 0) weekDlTotal += Math.round(gpts / price);
+          if (yuan > 0 && price > 0) weekDlTotal += Math.round((yuan * 10) / price);
           if (name && yuan > 0) gameWeek.push({ name, amount: yuan });
         }
         out.standaloneWeeklyRevenue = weekTotal;
@@ -1250,7 +1250,7 @@ var _BUILTIN_TABLES=[
         for (let i = 1; i < consumeSheet.data.length; i++) {
           for (const wc of monthWkCols) {
             const v = _parseNum(consumeSheet.data[i][wc.col]);
-            if (!isNaN(v)) monthTotal += v / 10;
+            if (!isNaN(v)) monthTotal += v; // 周列直接以元为单位
           }
         }
         out.standaloneMonthRevenue = monthTotal;
