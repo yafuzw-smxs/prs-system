@@ -1280,7 +1280,8 @@ var _BUILTIN_TABLES=[
           const name = String(r.B || r.A || '').trim();
           const raw = _parseNum(r[latestNetWk.col]);
           const gpts = isNaN(raw) ? 0 : raw;
-          const yuan = gpts / 10;
+          // 网络游戏消费数据直接以元为单位，无需除以10
+          const yuan = gpts;
           weekTotal += yuan;
           if (name && yuan > 0) gameWeek.push({ name, amount: yuan });
         }
@@ -1299,7 +1300,8 @@ var _BUILTIN_TABLES=[
         for (let i = 1; i < netSheet.data.length; i++) {
           for (const wc of monthWkCols) {
             const v = _parseNum(netSheet.data[i][wc.col]);
-            if (!isNaN(v)) monthTotal += v / 10;
+            // 网络游戏消费数据直接以元为单位，无需除以10
+            if (!isNaN(v)) monthTotal += v;
           }
         }
         out.networkMonthRevenue = monthTotal;
