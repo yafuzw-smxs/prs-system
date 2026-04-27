@@ -122,13 +122,51 @@ function runLogCleanup() {
 setTimeout(runLogCleanup, 8000);
 setInterval(runLogCleanup, 6 * 60 * 60 * 1000);
 
-// ── API: Manual backup download ──
+// ── API: Manual backup download (需登录) ──
 app.get('/api/backup', authMiddleware, (req, res) => {
   db.save(); // flush to disk first
   const dbPath = path.join(__dirname, 'data', 'prs.db');
   if (!require('fs').existsSync(dbPath)) return res.status(404).json({ error: '数据库文件不存在' });
   const date = new Date().toISOString().slice(0, 10);
   res.download(dbPath, `prs-backup-${date}.db`);
+});
+
+// ── API: 紧急备份下载（无需登录，用 BACKUP_TOKEN 环境变量鉴权）──
+// 用法：GET /api/emergency-backup?token=你的密钥
+//       GET /api/emergency-backup?token=你的密钥&file=prs-backup-2026-04-27  （下载指定日期备份）
+// 配置：在 Railway 控制台 Variables 里添加 BACKUP_TOKEN=随机字符串
+app.get('/api/emergency-backup', (req, res) => {
+  const secret = process.env.BACKUP_TOKEN;
+  if (!secret) return res.status(503).json({ error: '未配置 BACKUP_TOKEN 环境变量，紧急下载已禁用' });
+  if (req.query.token !== secret) return res.status(401).json({ error: 'token 错误' });
+
+  const fs = require('fs');
+  const dataDir = path.join(__dirname, 'data');
+
+  // 列出可用备份
+  if (req.query.list === '1') {
+    const backupDir = path.join(dataDir, 'backups');
+    const files = fs.existsSync(backupDir)
+      ? fs.readdirSync(backupDir).filter(f => f.endsWith('.db')).sort().reverse()
+      : [];
+    const mainExists = fs.existsSync(path.join(dataDir, 'prs.db'));
+    return res.json({ main: mainExists ? 'prs.db (当前数据库)' : null, backups: files });
+  }
+
+  // 下载指定历史备份
+  if (req.query.file) {
+    const name = path.basename(req.query.file) + (req.query.file.endsWith('.db') ? '' : '.db');
+    const filePath = path.join(dataDir, 'backups', name);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: '备份文件不存在: ' + name });
+    return res.download(filePath, name);
+  }
+
+  // 默认：下载当前数据库
+  db.save();
+  const dbPath = path.join(dataDir, 'prs.db');
+  if (!fs.existsSync(dbPath)) return res.status(404).json({ error: '数据库文件不存在' });
+  const date = new Date().toISOString().slice(0, 10);
+  res.download(dbPath, `prs-emergency-${date}.db`);
 });
 
 // ── Start (async for sql.js init) ──
