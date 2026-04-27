@@ -76,19 +76,20 @@ async function init() {
 
 function save() {
   if (!db) return;
+  const data = db.export();
+  fs.writeFileSync(DB_PATH, Buffer.from(data)); // 不捕获异常，让调用方感知失败
+}
+
+// Auto-save every 10 seconds（捕获异常防止进程崩溃，但 save() 本身不吞异常）
+setInterval(() => {
   try {
-    const data = db.export();
-    fs.writeFileSync(DB_PATH, Buffer.from(data));
+    save();
   } catch (e) {
-    console.error('[DB] 保存失败:', e.message, '| 路径:', DB_PATH);
-    // 如果是权限或空间问题，打印更多信息
+    console.error('[DB] 定时保存失败:', e.message, '| 路径:', DB_PATH);
     if (e.code === 'EROFS') console.error('[DB] 文件系统只读！请检查 Railway Volume 配置');
     if (e.code === 'ENOSPC') console.error('[DB] 磁盘空间不足！请检查 Railway Volume 容量');
   }
-}
-
-// Auto-save every 10 seconds
-setInterval(save, 10000);
+}, 10000);
 
 // ── Query helpers ──
 function findUser(username) {
