@@ -2,19 +2,34 @@ const initSqlJs = require('sql.js');
 const path = require('path');
 const fs = require('fs');
 
-const DATA_DIR = path.join(__dirname, 'data');
+// 支持通过环境变量指定数据目录（Railway Volume 挂载路径）
+// Railway 控制台设置：DATA_DIR=/app/data（或 Volume 挂载点）
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const DB_PATH = path.join(DATA_DIR, 'prs.db');
 let db = null;
 
 async function init() {
+  // 启动时打印关键路径，方便排查持久化问题
+  console.log('[DB] 数据目录:', DATA_DIR);
+  console.log('[DB] 数据库文件:', DB_PATH);
+  console.log('[DB] 文件已存在:', fs.existsSync(DB_PATH));
+  if (process.env.RAILWAY_VOLUME_MOUNT_PATH) {
+    console.log('[DB] Railway Volume 挂载路径:', process.env.RAILWAY_VOLUME_MOUNT_PATH);
+  } else {
+    console.warn('[DB] 警告: 未检测到 Railway Volume，数据将存储在临时文件系统，重启后会丢失！');
+    console.warn('[DB] 解决方法: 在 Railway 控制台为该服务添加 Volume，挂载路径设为 /app/data');
+  }
+
   const SQL = await initSqlJs();
   if (fs.existsSync(DB_PATH)) {
     const buf = fs.readFileSync(DB_PATH);
     db = new SQL.Database(buf);
+    console.log('[DB] 已从磁盘加载数据库');
   } else {
     db = new SQL.Database();
+    console.log('[DB] 创建新数据库（首次启动或 Volume 未挂载）');
   }
 
   db.run(`
@@ -61,8 +76,15 @@ async function init() {
 
 function save() {
   if (!db) return;
-  const data = db.export();
-  fs.writeFileSync(DB_PATH, Buffer.from(data));
+  try {
+    const data = db.export();
+    fs.writeFileSync(DB_PATH, Buffer.from(data));
+  } catch (e) {
+    console.error('[DB] 保存失败:', e.message, '| 路径:', DB_PATH);
+    // 如果是权限或空间问题，打印更多信息
+    if (e.code === 'EROFS') console.error('[DB] 文件系统只读！请检查 Railway Volume 配置');
+    if (e.code === 'ENOSPC') console.error('[DB] 磁盘空间不足！请检查 Railway Volume 容量');
+  }
 }
 
 // Auto-save every 10 seconds
