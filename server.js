@@ -172,6 +172,15 @@ app.get('/api/emergency-backup', (req, res) => {
 // ── Start (async for sql.js init) ──
 const PORT = process.env.PORT || 3000;
 
+// 启动时打印环境变量诊断信息（不泄露实际值）
+console.log('[ENV] BACKUP_TOKEN 是否设置:', !!process.env.BACKUP_TOKEN);
+console.log('[ENV] BACKUP_TOKEN 长度:', (process.env.BACKUP_TOKEN || '').length);
+console.log('[ENV] BACKUP_TOKEN 前2位:', (process.env.BACKUP_TOKEN || '').slice(0, 2));
+console.log('[ENV] DATA_DIR:', process.env.DATA_DIR || '(未设置)');
+console.log('[ENV] RAILWAY_VOLUME_MOUNT_PATH:', process.env.RAILWAY_VOLUME_MOUNT_PATH || '(未设置)');
+console.log('[ENV] RAILWAY_ENVIRONMENT_NAME:', process.env.RAILWAY_ENVIRONMENT_NAME || '(未设置)');
+console.log('[ENV] 所有以 BACKUP 开头的变量:', Object.keys(process.env).filter(k => k.toUpperCase().includes('BACKUP')));
+
 db.init().then(() => {
   app.listen(PORT, () => {
     console.log(`产品评测管理系统 服务已启动: http://localhost:${PORT}`);
