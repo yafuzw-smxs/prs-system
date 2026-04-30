@@ -1247,18 +1247,46 @@ var _BUILTIN_TABLES=[
       }
 
       // 本月销售额：累加本月所有周列（G点÷10=元）
+      // 同时：基于「首次有收入的周」识别新游戏 / 老游戏
       if (weekCols.length) {
         const monthPfx = weekCols[weekCols.length - 1].date.substring(0, 6);
         out.standaloneMonthLabel = monthPfx.replace(/(\d{4})(\d{2})/, '$1年$2月');
         const monthWkCols = weekCols.filter(w => w.date.startsWith(monthPfx));
         let monthTotal = 0;
+        let newGameCount = 0;
+        let newGameMonthRev = 0;  // 本月新游戏在本月的销售额（元）
+        let oldGameMonthRev = 0;  // 老游戏在本月的销售额（元）
         for (let i = 1; i < consumeSheet.data.length; i++) {
-          for (const wc of monthWkCols) {
-            const v = _parseNum(consumeSheet.data[i][wc.col]);
-            if (!isNaN(v)) monthTotal += v / 10; // G点÷10=元
+          const r = consumeSheet.data[i];
+          // 跳过没有游戏名的空行
+          const name = String(r.B || '').trim();
+          if (!name) continue;
+          // 找出该游戏首次出现非零收入的周（按时间顺序）
+          let firstRevDate = null;
+          for (const wc of weekCols) {
+            const v = _parseNum(r[wc.col]);
+            if (!isNaN(v) && v > 0) { firstRevDate = wc.date; break; }
           }
+          // 计算该游戏本月销售额
+          let gameMonthRev = 0;
+          for (const wc of monthWkCols) {
+            const v = _parseNum(r[wc.col]);
+            if (!isNaN(v)) gameMonthRev += v / 10; // G点÷10=元
+          }
+          monthTotal += gameMonthRev;
+          // 判定新/老：首次有收入的周在本月 → 新游戏
+          if (firstRevDate && firstRevDate.startsWith(monthPfx)) {
+            newGameCount++;
+            newGameMonthRev += gameMonthRev;
+          } else if (firstRevDate) {
+            oldGameMonthRev += gameMonthRev;
+          }
+          // 没有任何收入历史的游戏忽略
         }
         out.standaloneMonthRevenue = monthTotal;
+        out.standaloneNewThisMonth = newGameCount;
+        out.standaloneNewMonthRev = newGameMonthRev;
+        out.standaloneOldMonthRev = oldGameMonthRev;
       }
     }
 
@@ -1373,24 +1401,15 @@ var _BUILTIN_TABLES=[
     const autoMonthRev = (d.standaloneMonthRevenue || 0) + (d.networkMonthRevenue || 0);
     const hasAutoMonth = (d.standaloneMonthRevenue != null || d.networkMonthRevenue != null);
     const overviewMonthLabel = d.standaloneMonthLabel || d.networkMonthLabel || '';
-    const hasOverview = hasAutoMonth || !isNaN(d.cumulativeRevenue) || !isNaN(d.monthlyDownloads);
-    if (hasOverview) {
+    if (hasAutoMonth) {
       html += '<div class="dash-section"><div class="dash-section-title">📊 综合概览' + (overviewMonthLabel ? ' <span style="font-weight:400;font-size:12px;color:var(--text3)">(' + h(overviewMonthLabel) + ')</span>' : '') + '</div>';
       html += '<div class="dash-grid">';
-      if (hasAutoMonth) {
-        html += '<div class="dash-card c-amber"><div class="dash-label">本月总销售额</div><div class="dash-value">¥' + _fmtMoney(autoMonthRev) + '</div><div class="dash-sub">单机+网游自动汇总</div></div>';
-      }
+      html += '<div class="dash-card c-amber"><div class="dash-label">本月总销售额</div><div class="dash-value">¥' + _fmtMoney(autoMonthRev) + '</div><div class="dash-sub">单机+网游自动汇总</div></div>';
       if (d.standaloneMonthRevenue != null) {
         html += '<div class="dash-card c-purple"><div class="dash-label">单机当月流水</div><div class="dash-value">¥' + _fmtMoney(d.standaloneMonthRevenue) + '</div>' + (d.standaloneMonthLabel ? '<div class="dash-sub">' + h(d.standaloneMonthLabel) + '</div>' : '') + '</div>';
       }
       if (d.networkMonthRevenue != null) {
         html += '<div class="dash-card c-green"><div class="dash-label">网游当月流水</div><div class="dash-value">¥' + _fmtMoney(d.networkMonthRevenue) + '</div>' + (d.networkMonthLabel ? '<div class="dash-sub">' + h(d.networkMonthLabel) + '</div>' : '') + '</div>';
-      }
-      if (!isNaN(d.monthlyDownloads)) {
-        html += '<div class="dash-card c-cyan"><div class="dash-label">本月下载量</div><div class="dash-value">' + h(_fmtInt(d.monthlyDownloads) + ' 次') + '</div><div class="dash-sub">来自数据复盘</div></div>';
-      }
-      if (!isNaN(d.cumulativeRevenue)) {
-        html += '<div class="dash-card c-red"><div class="dash-label">累计总销售额</div><div class="dash-value">¥' + _fmtMoney(d.cumulativeRevenue) + '</div><div class="dash-sub">来自数据复盘</div></div>';
       }
       html += '</div>';
       // 网游 vs 单机 月销售占比（移自下方）
@@ -1419,9 +1438,9 @@ var _BUILTIN_TABLES=[
         const gamesVal = d.standaloneCount ? d.standaloneCount + ' 款' : (!isNaN(d.totalGames) ? _fmtInt(d.totalGames) + ' 款' : '—');
         html += '<div class="dash-card c-blue"><div class="dash-label">单机游戏总数</div><div class="dash-value">' + h(gamesVal) + '</div></div>';
       }
-      // 本月上新（移自综合概览）
-      if (!isNaN(d.newGamesThisMonth)) {
-        html += '<div class="dash-card c-green"><div class="dash-label">本月上新</div><div class="dash-value">' + h(d.newGamesThisMonth + ' 款') + '</div><div class="dash-sub">来自数据复盘</div></div>';
+      // 本月上新（基于「单机游戏消费数据」首次有收入的周判定）
+      if (d.standaloneNewThisMonth != null) {
+        html += '<div class="dash-card c-green"><div class="dash-label">本月上新</div><div class="dash-value">' + h(d.standaloneNewThisMonth + ' 款') + '</div>' + (d.standaloneMonthLabel ? '<div class="dash-sub">' + h(d.standaloneMonthLabel) + ' 首次产生收入</div>' : '') + '</div>';
       }
       if (d.standaloneWeeklyRevenue != null) {
         html += '<div class="dash-card c-cyan"><div class="dash-label">本周销售额</div><div class="dash-value">¥' + _fmtMoney(d.standaloneWeeklyRevenue) + '</div>' + (d.standaloneLatestWeekLabel ? '<div class="dash-sub">' + h(d.standaloneLatestWeekLabel) + ' 当周</div>' : '') + '</div>';
@@ -1442,17 +1461,21 @@ var _BUILTIN_TABLES=[
         });
         html += '</tbody></table></div>';
       }
-      // 新老游戏销售占比（移自综合概览）
-      if (d.newGameRev != null && d.oldGameRev != null) {
-        const totalNO = d.newGameRev + d.oldGameRev;
-        const newPct = totalNO ? (d.newGameRev / totalNO * 100) : 0;
+      // 新老游戏销售占比（基于「单机游戏消费数据」分析，按周更新）
+      // 新游戏 = 在本月才首次有收入的游戏；老游戏 = 之前已有收入的游戏
+      if ((d.standaloneNewMonthRev != null || d.standaloneOldMonthRev != null) &&
+          (d.standaloneNewMonthRev > 0 || d.standaloneOldMonthRev > 0)) {
+        const newRev = d.standaloneNewMonthRev || 0;
+        const oldRev = d.standaloneOldMonthRev || 0;
+        const totalNO = newRev + oldRev;
+        const newPct = totalNO ? (newRev / totalNO * 100) : 0;
         const oldPct = 100 - newPct;
-        html += '<div style="margin-top:12px"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">📈 新老游戏销售额占比 <span style="color:var(--text3)">(来自数据复盘)</span></div>';
+        html += '<div style="margin-top:12px"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">📈 新老游戏销售额占比' + (d.standaloneMonthLabel ? '（' + h(d.standaloneMonthLabel) + '）' : '') + ' <span style="color:var(--text3)">(基于消费数据，按周更新)</span></div>';
         html += '<div class="dash-pie">';
         html += '<div class="dash-pie-chart" style="background:conic-gradient(#3b82f6 0% ' + newPct.toFixed(1) + '%, #22c55e ' + newPct.toFixed(1) + '% 100%)"></div>';
         html += '<div class="dash-pie-legend">';
-        html += '<div class="dash-pie-item"><div class="dash-pie-dot" style="background:#3b82f6"></div>新游戏 ¥' + _fmtMoney(d.newGameRev) + ' (' + newPct.toFixed(1) + '%)</div>';
-        html += '<div class="dash-pie-item"><div class="dash-pie-dot" style="background:#22c55e"></div>老游戏 ¥' + _fmtMoney(d.oldGameRev) + ' (' + oldPct.toFixed(1) + '%)</div>';
+        html += '<div class="dash-pie-item"><div class="dash-pie-dot" style="background:#3b82f6"></div>新游戏 ¥' + _fmtMoney(newRev) + ' (' + newPct.toFixed(1) + '%)</div>';
+        html += '<div class="dash-pie-item"><div class="dash-pie-dot" style="background:#22c55e"></div>老游戏 ¥' + _fmtMoney(oldRev) + ' (' + oldPct.toFixed(1) + '%)</div>';
         html += '</div></div></div>';
       }
       html += '</div>';
