@@ -501,6 +501,7 @@ var _BUILTIN_TABLES=[
     }
     await load();
     renderCards();
+    startPolling();   // 启动轻量轮询：每 30 秒静默同步其他用户的更改
   }
 
   // ── 401 interceptor ──
@@ -544,15 +545,20 @@ var _BUILTIN_TABLES=[
   // Backend is source of truth. Do NOT fallback to localStorage when authenticated,
   // to avoid one user's stale local cache overwriting another user's data.
   let _loadedFromBackend = false;
+  let _lastBackendUpdatedAt = '';   // 用于轮询时检测后端变化
+  let _lastBackendUpdatedBy = '';
   async function load(){
     _loadedFromBackend = false;
     if (_auth) {
       try {
         const res = await fetch('/api/tables', {headers: authHeaders()});
         if (res.ok) {
-          const {tables} = await res.json();
+          const payload = await res.json();
+          const tables = payload.tables;
+          _lastBackendUpdatedAt = payload.updatedAt || '';
+          _lastBackendUpdatedBy = payload.updatedBy || '';
           _loadedFromBackend = true;
-          console.log('[load] backend returned tables=' + (tables ? tables.length : 'null'));
+          console.log('[load] backend returned tables=' + (tables ? tables.length : 'null') + ' updatedAt=' + _lastBackendUpdatedAt);
           if (tables && tables.length) {
             state.tables = tables;
           } else {
@@ -584,6 +590,67 @@ var _BUILTIN_TABLES=[
     _rebuildIndex();
   }
 
+  // ── 轻量轮询：每 30 秒静默检查后端是否有更新 ──
+  // 触发条件：已登录、本地无未保存改动、tab 可见
+  // 通过对比 updated_at 时间戳判断，有变化时拉取并刷新视图
+  let _pollTimer = null;
+  let _polling = false;
+  async function pollBackend(){
+    if (_polling) return;                           // 防止并发
+    if (!_auth || !_loadedFromBackend) return;      // 未登录或初次加载未完成
+    if (_dirty || _saving) return;                  // 本地有未保存改动或正在保存，跳过避免覆盖
+    if (document.hidden) return;                    // tab 不可见，省流量
+    _polling = true;
+    try {
+      const res = await fetch('/api/tables', { headers: authHeaders() });
+      if (!res.ok) return;
+      const payload = await res.json();
+      const newUpdatedAt = payload.updatedAt || '';
+      // 后端时间戳没变 → 无更新
+      if (newUpdatedAt && newUpdatedAt === _lastBackendUpdatedAt) return;
+      // 自己刚保存的 → 不弹提示（updatedBy 是自己 + 时间差很小）
+      const isSelfChange = payload.updatedBy && _auth.user && payload.updatedBy === _auth.user.username;
+      const tables = payload.tables;
+      if (tables && tables.length) {
+        state.tables = tables;
+        _rebuildIndex();
+        _kwCache.clear();
+        bus.emit('tables:change');
+        if (!isSelfChange) {
+          console.log('[poll] 检测到 ' + (payload.updatedBy || '其他用户') + ' 的更新，已同步');
+          _showSyncToast(payload.updatedBy || '其他用户', tables.length);
+        }
+      }
+      _lastBackendUpdatedAt = newUpdatedAt;
+      _lastBackendUpdatedBy = payload.updatedBy || '';
+    } catch (e) {
+      // 静默失败，下次再试
+    } finally {
+      _polling = false;
+    }
+  }
+  function startPolling(){
+    if (_pollTimer) clearInterval(_pollTimer);
+    _pollTimer = setInterval(pollBackend, 30000);   // 每 30 秒
+    // tab 重新可见时立刻拉一次（用户切回来想立马看到最新）
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) pollBackend();
+    });
+  }
+  function _showSyncToast(byUser, tableCount){
+    let t = document.getElementById('sync-toast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'sync-toast';
+      t.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#1f2937;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none';
+      document.body.appendChild(t);
+    }
+    t.textContent = '🔄 ' + byUser + ' 更新了表格（共 ' + tableCount + ' 个），已同步';
+    t.style.opacity = '1';
+    clearTimeout(t._hideT);
+    t._hideT = setTimeout(() => { t.style.opacity = '0'; }, 4000);
+  }
+
   function _showSaveStatus(ok, count){
     let el = document.getElementById('save-status');
     if(!el) return;
@@ -600,6 +667,7 @@ var _BUILTIN_TABLES=[
     // keep visible until next save (don't auto-hide)
   }
 
+  let _saving = false;
   function save(){
     // Only save to backend if we successfully loaded from backend first.
     // This prevents pushing stale local data that would overwrite other users' changes.
@@ -612,6 +680,7 @@ var _BUILTIN_TABLES=[
     const bodyStr = JSON.stringify({tables: state.tables});
     console.log('[save] sending PUT tables=' + tableCount + ' bytes=' + bodyStr.length);
     _dirty = false;
+    _saving = true;
     return fetch('/api/tables', {
       method: 'PUT',
       headers: authHeaders(),
@@ -623,6 +692,8 @@ var _BUILTIN_TABLES=[
     }).catch(err => {
       console.error('[save] FAILED:', err);
       _showSaveStatus(false, tableCount);
+    }).finally(() => {
+      _saving = false;
     });
   }
 
