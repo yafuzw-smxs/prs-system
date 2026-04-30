@@ -1222,6 +1222,19 @@ var _BUILTIN_TABLES=[
     if (v == null) return NaN;
     return parseFloat(String(v).replace(/,/g, '').replace(/[^\d.\-]/g, ''));
   }
+  // 解析日期字符串为 YYYYMM 月份前缀
+  // 兼容: 2026/4/15, 2026-04-15, 2026.4.15, 2026年4月15日, 20260415
+  function _parseDateMonth(s){
+    if (!s) return null;
+    s = String(s).trim();
+    // 2026/4/15, 2026-4-15, 2026.4.15, 2026年4月
+    let m = s.match(/^(\d{4})[\/\-\.年](\d{1,2})/);
+    if (m) return m[1] + String(m[2]).padStart(2, '0');
+    // 20260415
+    m = s.match(/^(\d{4})(\d{2})/);
+    if (m) return m[1] + m[2];
+    return null;
+  }
   function _fmtMoney(n){ return n.toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2}); }
   function _fmtInt(n){ return n.toLocaleString('zh-CN'); }
   function _pct(a, b){ return b ? (a / b * 100).toFixed(1) + '%' : '—'; }
@@ -1285,10 +1298,13 @@ var _BUILTIN_TABLES=[
       const hdr = consumeSheet.data[0];
       const cols = consumeSheet.columns || [];
       const weekCols = [];
+      // 找「上架时间」列（兼容上架时间/上线时间/发布时间命名）
+      let releaseCol = null;
       for (const c of cols) {
         const v = String(hdr[c] || '');
         const m = v.match(/^(\d{8})/);
         if (m) weekCols.push({ col: c, date: m[1], label: v });
+        if (!releaseCol && /上架时间|上线时间|发布时间/.test(v)) releaseCol = c;
       }
       weekCols.sort((a, b) => a.date.localeCompare(b.date));
       const latestWk = weekCols.length ? weekCols[weekCols.length - 1] : null;
@@ -1318,26 +1334,23 @@ var _BUILTIN_TABLES=[
       }
 
       // 本月销售额：累加本月所有周列（G点÷10=元）
-      // 同时：基于「首次有收入的周」识别新游戏 / 老游戏
+      // 同时：基于「上架时间」列识别新游戏 / 老游戏（不再用首次产生消费的方式）
       if (weekCols.length) {
         const monthPfx = weekCols[weekCols.length - 1].date.substring(0, 6);
         out.standaloneMonthLabel = monthPfx.replace(/(\d{4})(\d{2})/, '$1年$2月');
         const monthWkCols = weekCols.filter(w => w.date.startsWith(monthPfx));
         let monthTotal = 0;
         let newGameCount = 0;
-        let newGameMonthRev = 0;  // 本月新游戏在本月的销售额（元）
-        let oldGameMonthRev = 0;  // 老游戏在本月的销售额（元）
+        let newGameMonthRev = 0;  // 本月上架的游戏在本月的销售额（元）
+        let oldGameMonthRev = 0;  // 之前已上架的游戏在本月的销售额（元）
         for (let i = 1; i < consumeSheet.data.length; i++) {
           const r = consumeSheet.data[i];
           // 跳过没有游戏名的空行
           const name = String(r.B || '').trim();
           if (!name) continue;
-          // 找出该游戏首次出现非零收入的周（按时间顺序）
-          let firstRevDate = null;
-          for (const wc of weekCols) {
-            const v = _parseNum(r[wc.col]);
-            if (!isNaN(v) && v > 0) { firstRevDate = wc.date; break; }
-          }
+          // 解析上架时间为 YYYYMM 前缀
+          const releaseRaw = releaseCol ? String(r[releaseCol] || '').trim() : '';
+          const releaseMonth = _parseDateMonth(releaseRaw);
           // 计算该游戏本月销售额
           let gameMonthRev = 0;
           for (const wc of monthWkCols) {
@@ -1345,19 +1358,20 @@ var _BUILTIN_TABLES=[
             if (!isNaN(v)) gameMonthRev += v / 10; // G点÷10=元
           }
           monthTotal += gameMonthRev;
-          // 判定新/老：首次有收入的周在本月 → 新游戏
-          if (firstRevDate && firstRevDate.startsWith(monthPfx)) {
+          // 判定新/老：上架时间在本月 → 新游戏
+          if (releaseMonth && releaseMonth === monthPfx) {
             newGameCount++;
             newGameMonthRev += gameMonthRev;
-          } else if (firstRevDate) {
+          } else if (releaseMonth) {
             oldGameMonthRev += gameMonthRev;
           }
-          // 没有任何收入历史的游戏忽略
+          // 没有上架时间的游戏不计入新/老，但仍计入月销售额总数
         }
         out.standaloneMonthRevenue = monthTotal;
         out.standaloneNewThisMonth = newGameCount;
         out.standaloneNewMonthRev = newGameMonthRev;
         out.standaloneOldMonthRev = oldGameMonthRev;
+        out.standaloneHasReleaseCol = !!releaseCol; // 用于前端显示提示
       }
     }
 
@@ -1509,9 +1523,12 @@ var _BUILTIN_TABLES=[
         const gamesVal = d.standaloneCount ? d.standaloneCount + ' 款' : (!isNaN(d.totalGames) ? _fmtInt(d.totalGames) + ' 款' : '—');
         html += '<div class="dash-card c-blue"><div class="dash-label">单机游戏总数</div><div class="dash-value">' + h(gamesVal) + '</div></div>';
       }
-      // 本月上新（基于「单机游戏消费数据」首次有收入的周判定）
+      // 本月上新（基于「单机游戏消费数据」上架时间列）
       if (d.standaloneNewThisMonth != null) {
-        html += '<div class="dash-card c-green"><div class="dash-label">本月上新</div><div class="dash-value">' + h(d.standaloneNewThisMonth + ' 款') + '</div>' + (d.standaloneMonthLabel ? '<div class="dash-sub">' + h(d.standaloneMonthLabel) + ' 首次产生收入</div>' : '') + '</div>';
+        const newSub = d.standaloneHasReleaseCol
+          ? (d.standaloneMonthLabel ? d.standaloneMonthLabel + ' 上架' : '按上架时间')
+          : '⚠ 缺少上架时间列';
+        html += '<div class="dash-card c-green"><div class="dash-label">本月上新</div><div class="dash-value">' + h(d.standaloneNewThisMonth + ' 款') + '</div><div class="dash-sub">' + h(newSub) + '</div></div>';
       }
       if (d.standaloneWeeklyRevenue != null) {
         html += '<div class="dash-card c-cyan"><div class="dash-label">本周销售额</div><div class="dash-value">¥' + _fmtMoney(d.standaloneWeeklyRevenue) + '</div>' + (d.standaloneLatestWeekLabel ? '<div class="dash-sub">' + h(d.standaloneLatestWeekLabel) + ' 当周</div>' : '') + '</div>';
@@ -1541,7 +1558,7 @@ var _BUILTIN_TABLES=[
         const totalNO = newRev + oldRev;
         const newPct = totalNO ? (newRev / totalNO * 100) : 0;
         const oldPct = 100 - newPct;
-        html += '<div style="margin-top:12px"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">📈 新老游戏销售额占比' + (d.standaloneMonthLabel ? '（' + h(d.standaloneMonthLabel) + '）' : '') + ' <span style="color:var(--text3)">(基于消费数据，按周更新)</span></div>';
+        html += '<div style="margin-top:12px"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">📈 新老游戏销售额占比' + (d.standaloneMonthLabel ? '（' + h(d.standaloneMonthLabel) + '）' : '') + ' <span style="color:var(--text3)">(按上架时间区分，按周更新)</span></div>';
         html += '<div class="dash-pie">';
         html += '<div class="dash-pie-chart" style="background:conic-gradient(#3b82f6 0% ' + newPct.toFixed(1) + '%, #22c55e ' + newPct.toFixed(1) + '% 100%)"></div>';
         html += '<div class="dash-pie-legend">';
