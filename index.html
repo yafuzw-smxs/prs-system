@@ -1223,73 +1223,112 @@ var _BUILTIN_TABLES=[
     return parseFloat(String(v).replace(/,/g, '').replace(/[^\d.\-]/g, ''));
   }
   // 解析日期字符串为 YYYYMM 月份前缀
-  // 兼容: 2026/4/15, 2026-04-15, 2026.4.15, 2026年4月15日, 20260415
+  // 兼容: 2026/4/15, 2026-04-15, 2026.4.15, 2026年4月15日, 20260415, 9/12/25, 9/12/2025
   function _parseDateMonth(s){
     if (!s) return null;
     s = String(s).trim();
-    // 2026/4/15, 2026-4-15, 2026.4.15, 2026年4月
+    // 4位年开头: 2026/4/15, 2026-4-15, 2026.4.15, 2026年4月
     let m = s.match(/^(\d{4})[\/\-\.年](\d{1,2})/);
     if (m) return m[1] + String(m[2]).padStart(2, '0');
-    // 20260415
+    // 紧凑8位: 20260415
     m = s.match(/^(\d{4})(\d{2})/);
     if (m) return m[1] + m[2];
+    // M/D/YY 或 M/D/YYYY: 9/12/25, 9/12/2025
+    m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+    if (m) {
+      let year = parseInt(m[3], 10);
+      if (year < 100) year = year < 50 ? 2000 + year : 1900 + year;
+      return String(year) + String(m[1]).padStart(2, '0');
+    }
     return null;
   }
   function _fmtMoney(n){ return n.toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2}); }
   function _fmtInt(n){ return n.toLocaleString('zh-CN'); }
   function _pct(a, b){ return b ? (a / b * 100).toFixed(1) + '%' : '—'; }
 
-  function _computeDashData(tbl){
+  function _computeDashData(tbl, allTables){
     const out = {};
+    allTables = allTables || [tbl];
 
-    // ── 1. 综合概览：从最新 数据复盘-* sheet 读取 ──
-    const recapNames = tbl.sheets.filter(s => /^数据复盘-/.test(s.name)).map(s => s.name).sort();
-    const latestRecap = recapNames.length ? _findSheet(tbl, recapNames[recapNames.length - 1]) : null;
-    out.recapName = latestRecap ? latestRecap.name : null;
-
-    if (latestRecap) {
-      const rd = latestRecap.data;
-      for (let i = 0; i < Math.min(rd.length, 20); i++) {
-        const a = String(rd[i].A || '');
-        if (a.includes('本月数据')) {
-          out.totalGames = _parseNum(rd[i].B);
-          out.newGamesThisMonth = _parseNum(rd[i].C);
-          out.monthlyDownloads = _parseNum(rd[i].D);
-          out.cumulativeRevenue = _parseNum(rd[i].E);
-          out.monthlyRevenue = _parseNum(rd[i].F);
-          break;
+    // ── 1. 活动销售额：仅从「盲盒活动」「永久卡」两个 sheet 计算 ──
+    // 1a. 盲盒活动：每行一笔抽奖记录
+    //     D列「抽奖时间」用于划月，G列「消耗G点」÷ 10 = 元
+    const blindSheet = _findSheet(tbl, '盲盒活动');
+    if (blindSheet && blindSheet.data.length > 1) {
+      const hdr = blindSheet.data[0];
+      const cols = blindSheet.columns || [];
+      let timeCol = null, gptCol = null;
+      for (const c of cols) {
+        const v = String(hdr[c] || '');
+        if (!timeCol && /抽奖时间|时间|日期/.test(v)) timeCol = c;
+        if (!gptCol && /消耗.*G点|消耗G点/.test(v)) gptCol = c;
+      }
+      let totalGpt = 0, monthGpt = 0, totalCnt = 0, monthCnt = 0;
+      // 找"最新月份"作为本月：取所有抽奖时间里最大的月份
+      let latestMonth = '';
+      for (let i = 1; i < blindSheet.data.length; i++) {
+        const r = blindSheet.data[i];
+        const ts = timeCol ? String(r[timeCol] || '') : '';
+        const m = _parseDateMonth(ts);
+        if (m && m > latestMonth) latestMonth = m;
+      }
+      for (let i = 1; i < blindSheet.data.length; i++) {
+        const r = blindSheet.data[i];
+        const gpt = gptCol ? _parseNum(r[gptCol]) : NaN;
+        if (isNaN(gpt) || gpt <= 0) continue;
+        totalGpt += gpt;
+        totalCnt++;
+        const m = timeCol ? _parseDateMonth(String(r[timeCol] || '')) : null;
+        if (m && m === latestMonth) {
+          monthGpt += gpt;
+          monthCnt++;
         }
       }
-      // New/old game ratio
-      for (let i = 0; i < rd.length; i++) {
-        const a = String(rd[i].A || '');
-        if (/2026.*月/.test(a) && rd[i].B && rd[i].C && rd[i].D) {
-          const nv = _parseNum(rd[i].B), ov = _parseNum(rd[i].C);
-          if (!isNaN(nv) && !isNaN(ov) && nv < ov) {
-            out.newGameRev = nv; out.oldGameRev = ov;
-          }
-        }
-      }
-      // Blind box activity
-      for (let i = 1; i < rd.length; i++) {
-        const prev = String(rd[i-1].A || '') + String(rd[i-1].B || '');
-        if (/盲盒.*累计销售额/.test(prev) && !isNaN(_parseNum(rd[i].A))) {
-          out.blindBoxRev = _parseNum(rd[i].A);
-          if (rd[i].B) out.blindBoxOrigPrice = _parseNum(rd[i].B);
-        }
-      }
+      out.blindBoxRev = totalGpt / 10;          // 元
+      out.blindBoxMonthRev = monthGpt / 10;
+      out.blindBoxCount = totalCnt;
+      out.blindBoxMonthCount = monthCnt;
+      out.blindBoxMonthLabel = latestMonth ? latestMonth.replace(/(\d{4})(\d{2})/, '$1年$2月') : '';
     }
 
-    // ── 1b. 会员卡数据：从 数据复盘-26年1月 读取 ──
-    const jan = _findSheet(tbl, '数据复盘-26年1月');
-    if (jan) {
-      for (let i = 0; i < jan.data.length; i++) {
-        const a = String(jan.data[i].A || '').trim();
-        const bv = _parseNum(jan.data[i].B);
-        if (a === '极速周卡' && !isNaN(bv)) { out.weeklyCardRev = bv; out.weeklyCardDl = _parseNum(jan.data[i].C); }
-        if (a === '尊享会员永久卡' && !isNaN(bv)) { out.permCardRev = bv; out.permCardDl = _parseNum(jan.data[i].C); }
-        if (/尊享会员永久卡.*新人/.test(a) && !isNaN(bv)) { out.permCardNewRev = bv; out.permCardNewDl = _parseNum(jan.data[i].C); }
+    // 1b. 永久卡：每行一笔购买（无金额列，按类型计数）
+    //     A列日期判定本月，E列「特权会员」按类型分组
+    const permSheet = _findSheet(tbl, '永久卡');
+    if (permSheet && permSheet.data.length > 1) {
+      const hdr = permSheet.data[0];
+      const cols = permSheet.columns || [];
+      let dateCol = null, typeCol = null;
+      for (const c of cols) {
+        const v = String(hdr[c] || '');
+        if (!dateCol && /^日期$|购买日期/.test(v)) dateCol = c;
+        if (!typeCol && /特权会员|会员类型|卡类型/.test(v)) typeCol = c;
       }
+      // 找最新月份
+      let latestMonth = '';
+      for (let i = 1; i < permSheet.data.length; i++) {
+        const r = permSheet.data[i];
+        const m = dateCol ? _parseDateMonth(String(r[dateCol] || '')) : null;
+        if (m && m > latestMonth) latestMonth = m;
+      }
+      const byType = {};         // { type: { total, month } }
+      let totalCnt = 0, monthCnt = 0;
+      for (let i = 1; i < permSheet.data.length; i++) {
+        const r = permSheet.data[i];
+        const type = typeCol ? String(r[typeCol] || '').trim() : '未分类';
+        if (!type) continue;
+        const m = dateCol ? _parseDateMonth(String(r[dateCol] || '')) : null;
+        if (!byType[type]) byType[type] = { total: 0, month: 0 };
+        byType[type].total++;
+        totalCnt++;
+        if (m && m === latestMonth) {
+          byType[type].month++;
+          monthCnt++;
+        }
+      }
+      out.permCardTotalCount = totalCnt;
+      out.permCardMonthCount = monthCnt;
+      out.permCardByType = byType;   // { '尊享会员永久卡': {total, month}, ... }
+      out.permCardMonthLabel = latestMonth ? latestMonth.replace(/(\d{4})(\d{2})/, '$1年$2月') : '';
     }
 
     // ── 2. 单机游戏详细数据：仅从「单机游戏消费数据」sheet 计算 ──
@@ -1298,13 +1337,15 @@ var _BUILTIN_TABLES=[
       const hdr = consumeSheet.data[0];
       const cols = consumeSheet.columns || [];
       const weekCols = [];
-      // 找「上架时间」列（兼容上架时间/上线时间/发布时间命名）
+      // 找「上架时间」「价格」列（按表头匹配，避免硬编码列字母失效）
       let releaseCol = null;
+      let priceCol = null;
       for (const c of cols) {
         const v = String(hdr[c] || '');
         const m = v.match(/^(\d{8})/);
         if (m) weekCols.push({ col: c, date: m[1], label: v });
         if (!releaseCol && /上架时间|上线时间|发布时间/.test(v)) releaseCol = c;
+        if (!priceCol && /价格|售价|单价/.test(v)) priceCol = c;
       }
       weekCols.sort((a, b) => a.date.localeCompare(b.date));
       const latestWk = weekCols.length ? weekCols[weekCols.length - 1] : null;
@@ -1322,8 +1363,8 @@ var _BUILTIN_TABLES=[
           const gpts = isNaN(raw) ? 0 : raw; // 单机周列单位：G点
           const yuan = gpts / 10;            // G点÷10=元
           weekTotal += yuan;
-          // 下载量估算：G点 ÷ 单价(G点/个)
-          const price = _parseNum(r.F);
+          // 下载量估算：本周G点 ÷ 单价(G点/个)，按游戏分别算后汇总
+          const price = priceCol ? _parseNum(r[priceCol]) : NaN;
           if (gpts > 0 && price > 0) weekDlTotal += Math.round(gpts / price);
           if (name && yuan > 0) gameWeek.push({ name, amount: yuan });
         }
@@ -1427,34 +1468,84 @@ var _BUILTIN_TABLES=[
       }
     }
 
-    // ── 4. 标签分布：从「源数据表单」读取 ──
-    const tagSheet = _findSheet(tbl, '源数据表单');
-    if (tagSheet && tagSheet.data.length > 1) {
-      const tagMap = {};
-      for (let i = 1; i < tagSheet.data.length; i++) {
-        const raw = String(tagSheet.data[i].C || '');
-        if (!raw) continue;
-        const tags = raw.split(/[\/,，、]/).map(t => t.trim()).filter(Boolean);
-        for (const tag of tags) { tagMap[tag] = (tagMap[tag] || 0) + 1; }
+    // ── 4a. 单机标签分布：从「单机游戏消费数据」G列「游戏标签」读取 ──
+    if (consumeSheet && consumeSheet.data.length > 1) {
+      const hdr = consumeSheet.data[0];
+      const cols = consumeSheet.columns || [];
+      let tagCol = null;
+      for (const c of cols) {
+        const v = String(hdr[c] || '');
+        if (!tagCol && /游戏标签|标签|关键词/.test(v)) tagCol = c;
       }
-      const tagList = Object.entries(tagMap).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
-      out.totalTags = tagList.length;
-      out.tagList = tagList;
-      out.tagGameCount = tagSheet.data.length - 1;
+      if (tagCol) {
+        const tagMap = {};
+        let gameCount = 0;
+        for (let i = 1; i < consumeSheet.data.length; i++) {
+          const r = consumeSheet.data[i];
+          if (!String(r.B || '').trim()) continue;
+          gameCount++;
+          const raw = String(r[tagCol] || '');
+          if (!raw) continue;
+          const tags = raw.split(/[\/,，、]/).map(t => t.trim()).filter(Boolean);
+          for (const tag of tags) tagMap[tag] = (tagMap[tag] || 0) + 1;
+        }
+        const list = Object.entries(tagMap).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+        out.standaloneTagList = list;
+        out.standaloneTagTotal = list.length;
+        out.standaloneTagGameCount = gameCount;
+      }
     }
 
-    // ── 5. 游戏类型数量：从「上架游戏ID列表」读取 ──
-    const idSheet = _findSheet(tbl, '上架游戏ID列表');
-    if (idSheet && idSheet.data.length > 1) {
-      let standalone = 0, network = 0;
-      for (let i = 1; i < idSheet.data.length; i++) {
-        const t = String(idSheet.data[i].C || '');
-        if (t.includes('单机')) standalone++;
-        else if (t.includes('网络')) network++;
+    // ── 4b. 网游标签分布：跨表查找「网游评测表」T列「关键词」读取 ──
+    let netReviewSheet = null;
+    for (const otherTbl of allTables) {
+      const s = _findSheet(otherTbl, '网游评测表');
+      if (s && s.data && s.data.length > 1) { netReviewSheet = s; break; }
+    }
+    if (netReviewSheet) {
+      const hdr = netReviewSheet.data[0];
+      const cols = netReviewSheet.columns || [];
+      let tagCol = null, nameCol = null;
+      // 表头可能在第一行或第二行（用户表里 A=游戏名称 B=提测时间）
+      for (const c of cols) {
+        const v = String(hdr[c] || '');
+        if (!tagCol && /关键词|游戏标签|标签/.test(v)) tagCol = c;
+        if (!nameCol && /游戏名称|游戏名/.test(v)) nameCol = c;
       }
-      out.standaloneCount = standalone;
-      out.networkCount = network;
-      out.totalGameCount = standalone + network;
+      if (tagCol) {
+        const tagMap = {};
+        let gameCount = 0;
+        for (let i = 1; i < netReviewSheet.data.length; i++) {
+          const r = netReviewSheet.data[i];
+          const name = nameCol ? String(r[nameCol] || '').trim() : '';
+          if (!name) continue;
+          gameCount++;
+          const raw = String(r[tagCol] || '');
+          if (!raw) continue;
+          const tags = raw.split(/[\/,，、]/).map(t => t.trim()).filter(Boolean);
+          for (const tag of tags) tagMap[tag] = (tagMap[tag] || 0) + 1;
+        }
+        const list = Object.entries(tagMap).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+        out.networkTagList = list;
+        out.networkTagTotal = list.length;
+        out.networkTagGameCount = gameCount;
+      }
+    }
+
+    // ── 5. 游戏总数：从消费数据 sheet 行数统计（不再依赖上架游戏ID列表）──
+    if (consumeSheet && consumeSheet.data.length > 1) {
+      let cnt = 0;
+      for (let i = 1; i < consumeSheet.data.length; i++) {
+        if (String(consumeSheet.data[i].B || '').trim()) cnt++;
+      }
+      out.standaloneCount = cnt;
+    }
+    if (netSheet && netSheet.data.length > 1) {
+      let cnt = 0;
+      for (let i = 1; i < netSheet.data.length; i++) {
+        if (String(netSheet.data[i].B || netSheet.data[i].A || '').trim()) cnt++;
+      }
+      out.networkCount = cnt;
     }
 
     return out;
@@ -1467,7 +1558,7 @@ var _BUILTIN_TABLES=[
     const tbl = state.byId.get(String(tid));
     if (!tbl) { body.innerHTML = '<div class="dash-empty">表格未找到</div>'; return; }
 
-    const d = _computeDashData(tbl);
+    const d = _computeDashData(tbl, state.tables);
     const h = escH;
     let html = '';
 
@@ -1549,6 +1640,17 @@ var _BUILTIN_TABLES=[
         });
         html += '</tbody></table></div>';
       }
+      // 单机游戏标签数量统计（来源：单机游戏消费数据 G列）
+      if (d.standaloneTagList && d.standaloneTagList.length) {
+        const maxCount = d.standaloneTagList[0].count;
+        html += '<div style="margin-top:12px"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">🏷️ 单机游戏标签分布 <span style="color:var(--text3)">共 ' + d.standaloneTagTotal + ' 个标签，来自 ' + d.standaloneTagGameCount + ' 款游戏</span></div>';
+        html += '<div class="dash-tag-grid">';
+        d.standaloneTagList.forEach(t => {
+          const pct = maxCount ? (t.count / maxCount * 100) : 0;
+          html += '<div class="dash-tag-row"><span class="dash-tag-name">' + h(t.name) + '</span><div class="dash-tag-bar"><div class="dash-tag-fill" style="width:' + pct.toFixed(1) + '%"></div></div><span class="dash-tag-cnt">' + t.count + '</span></div>';
+        });
+        html += '</div></div>';
+      }
       // 新老游戏销售占比（基于「单机游戏消费数据」分析，按周更新）
       // 新游戏 = 在本月才首次有收入的游戏；老游戏 = 之前已有收入的游戏
       if ((d.standaloneNewMonthRev != null || d.standaloneOldMonthRev != null) &&
@@ -1589,42 +1691,41 @@ var _BUILTIN_TABLES=[
         });
         html += '</tbody></table></div>';
       }
+      // 网游游戏标签数量统计（来源：「网游评测表」T列「关键词」，跨表查找）
+      if (d.networkTagList && d.networkTagList.length) {
+        const maxCount = d.networkTagList[0].count;
+        html += '<div style="margin-top:12px"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">🏷️ 网游游戏标签分布 <span style="color:var(--text3)">共 ' + d.networkTagTotal + ' 个标签，来自 ' + d.networkTagGameCount + ' 款游戏（来自网游评测表）</span></div>';
+        html += '<div class="dash-tag-grid">';
+        d.networkTagList.forEach(t => {
+          const pct = maxCount ? (t.count / maxCount * 100) : 0;
+          html += '<div class="dash-tag-row"><span class="dash-tag-name">' + h(t.name) + '</span><div class="dash-tag-bar"><div class="dash-tag-fill" style="width:' + pct.toFixed(1) + '%"></div></div><span class="dash-tag-cnt">' + t.count + '</span></div>';
+        });
+        html += '</div></div>';
+      }
       html += '</div>';
     }
 
-    // ── 活动销售额（来源：数据复盘 sheet）──
-    if (d.blindBoxRev != null || d.weeklyCardRev != null) {
-      html += '<div class="dash-section"><div class="dash-section-title">🎰 活动销售额（与直购独立统计）</div>';
+    // ── 活动销售额（仅从「盲盒活动」「永久卡」sheet 计算）──
+    if (d.blindBoxRev != null || d.permCardTotalCount != null) {
+      html += '<div class="dash-section"><div class="dash-section-title">🎰 活动销售额 <span style="font-weight:400;font-size:12px;color:var(--text3)">（仅来自盲盒活动 + 永久卡 sheet）</span></div>';
       html += '<div class="dash-grid" style="margin-bottom:0">';
       if (d.blindBoxRev != null) {
-        html += '<div class="dash-card c-amber"><div class="dash-label">盲盒活动累计销售额</div><div class="dash-value" style="font-size:20px">¥' + _fmtMoney(d.blindBoxRev) + '</div>';
-        if (d.blindBoxOrigPrice) html += '<div class="dash-sub">游戏原价总和 ¥' + _fmtMoney(d.blindBoxOrigPrice) + '</div>';
-        html += '</div>';
+        html += '<div class="dash-card c-amber"><div class="dash-label">盲盒活动累计销售额</div><div class="dash-value" style="font-size:20px">¥' + _fmtMoney(d.blindBoxRev) + '</div><div class="dash-sub">' + _fmtInt(d.blindBoxCount || 0) + ' 笔抽奖记录</div></div>';
+        if (d.blindBoxMonthRev != null) {
+          html += '<div class="dash-card c-amber"><div class="dash-label">盲盒本月销售额</div><div class="dash-value" style="font-size:20px">¥' + _fmtMoney(d.blindBoxMonthRev) + '</div><div class="dash-sub">' + h(d.blindBoxMonthLabel || '') + ' · ' + _fmtInt(d.blindBoxMonthCount || 0) + ' 笔</div></div>';
+        }
       }
-      if (d.weeklyCardRev != null) {
-        html += '<div class="dash-card c-cyan"><div class="dash-label">极速周卡收入 (1月)</div><div class="dash-value" style="font-size:20px">¥' + _fmtMoney(d.weeklyCardRev) + '</div>';
-        if (d.weeklyCardDl) html += '<div class="dash-sub">下载 ' + _fmtInt(d.weeklyCardDl) + ' 次</div>';
+      if (d.permCardTotalCount != null) {
+        html += '<div class="dash-card c-purple"><div class="dash-label">永久卡累计购买</div><div class="dash-value" style="font-size:20px">' + _fmtInt(d.permCardTotalCount) + ' 张</div>';
+        const types = Object.keys(d.permCardByType || {});
+        if (types.length) {
+          html += '<div class="dash-sub">' + types.map(t => h(t) + ' ' + d.permCardByType[t].total).join(' · ') + '</div>';
+        }
         html += '</div>';
+        if (d.permCardMonthCount != null) {
+          html += '<div class="dash-card c-purple"><div class="dash-label">永久卡本月购买</div><div class="dash-value" style="font-size:20px">' + _fmtInt(d.permCardMonthCount) + ' 张</div><div class="dash-sub">' + h(d.permCardMonthLabel || '') + '</div></div>';
+        }
       }
-      if (d.permCardRev != null) {
-        const totalPerm = (d.permCardRev || 0) + (d.permCardNewRev || 0);
-        html += '<div class="dash-card c-purple"><div class="dash-label">永久卡收入 (1月)</div><div class="dash-value" style="font-size:20px">¥' + _fmtMoney(totalPerm) + '</div>';
-        const totalDl = (d.permCardDl || 0) + (d.permCardNewDl || 0);
-        if (totalDl) html += '<div class="dash-sub">下载 ' + _fmtInt(totalDl) + ' 次</div>';
-        html += '</div>';
-      }
-      html += '</div></div>';
-    }
-
-    // ── 标签分布（来源：源数据表单 sheet）──
-    if (d.tagList && d.tagList.length) {
-      const maxCount = d.tagList[0].count;
-      html += '<div class="dash-section"><div class="dash-section-title">🏷️ 游戏标签分布 <span style="font-weight:400;font-size:12px;color:var(--text3)">共 ' + d.totalTags + ' 个标签，来自 ' + (d.tagGameCount || '?') + ' 款游戏</span></div>';
-      html += '<div class="dash-tag-grid">';
-      d.tagList.forEach(t => {
-        const pct = maxCount ? (t.count / maxCount * 100) : 0;
-        html += '<div class="dash-tag-row"><span class="dash-tag-name">' + h(t.name) + '</span><div class="dash-tag-bar"><div class="dash-tag-fill" style="width:' + pct.toFixed(1) + '%"></div></div><span class="dash-tag-cnt">' + t.count + '</span></div>';
-      });
       html += '</div></div>';
     }
 
