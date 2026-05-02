@@ -123,13 +123,13 @@ select.ksel:focus{outline:none;border-color:var(--text)}
 .dot.c-red{background:#ef4444}.dot.c-blue{background:#3b82f6}.dot.c-green{background:#22c55e}.dot.c-amber{background:#f59e0b}.dot.c-purple{background:#8b5cf6}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:100px}
 #view-dash{flex:1;overflow-y:auto}
-.dash-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;margin-bottom:28px}
-.dash-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;position:relative;overflow:hidden}
+.dash-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-bottom:28px}
+.dash-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;position:relative;overflow:hidden;min-width:0}
 .dash-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
 .dash-card.c-blue::before{background:#3b82f6}.dash-card.c-green::before{background:#22c55e}.dash-card.c-amber::before{background:#f59e0b}.dash-card.c-purple::before{background:#8b5cf6}.dash-card.c-red::before{background:#ef4444}.dash-card.c-cyan::before{background:#06b6d4}
 .dash-card .dash-label{font-size:12px;color:var(--text2);font-weight:500;margin-bottom:6px}
-.dash-card .dash-value{font-size:26px;font-weight:700;font-family:'DM Mono',monospace;line-height:1.2}
-.dash-card .dash-sub{font-size:11px;color:var(--text3);margin-top:4px;font-family:'DM Mono',monospace}
+.dash-card .dash-value{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-card .dash-sub{font-size:11px;color:var(--text3);margin-top:4px;font-family:'DM Mono',monospace;word-break:break-all}
 .dash-section{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:20px}
 .dash-section-title{font-size:14px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px}
 .dash-top10{width:100%;border-collapse:collapse;font-size:13px}
@@ -1242,7 +1242,7 @@ var _BUILTIN_TABLES=[
     }
     return null;
   }
-  function _fmtMoney(n){ return n.toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+  function _fmtMoney(n){ return n.toLocaleString('zh-CN', {minimumFractionDigits:1, maximumFractionDigits:1}); }
   function _fmtInt(n){ return n.toLocaleString('zh-CN'); }
   function _pct(a, b){ return b ? (a / b * 100).toFixed(1) + '%' : '—'; }
 
@@ -1257,13 +1257,14 @@ var _BUILTIN_TABLES=[
     if (blindSheet && blindSheet.data.length > 1) {
       const hdr = blindSheet.data[0];
       const cols = blindSheet.columns || [];
-      let timeCol = null, gptCol = null;
+      let timeCol = null, gptCol = null, gamePriceCol = null;
       for (const c of cols) {
         const v = String(hdr[c] || '');
         if (!timeCol && /抽奖时间|时间|日期/.test(v)) timeCol = c;
         if (!gptCol && /消耗.*G点|消耗G点/.test(v)) gptCol = c;
+        if (!gamePriceCol && /游戏价格/.test(v)) gamePriceCol = c;
       }
-      let totalGpt = 0, monthGpt = 0, totalCnt = 0, monthCnt = 0;
+      let monthGpt = 0, monthCnt = 0, monthGameValueGpt = 0;
       // 找"最新月份"作为本月：取所有抽奖时间里最大的月份
       let latestMonth = '';
       for (let i = 1; i < blindSheet.data.length; i++) {
@@ -1275,18 +1276,17 @@ var _BUILTIN_TABLES=[
       for (let i = 1; i < blindSheet.data.length; i++) {
         const r = blindSheet.data[i];
         const gpt = gptCol ? _parseNum(r[gptCol]) : NaN;
-        if (isNaN(gpt) || gpt <= 0) continue;
-        totalGpt += gpt;
-        totalCnt++;
         const m = timeCol ? _parseDateMonth(String(r[timeCol] || '')) : null;
-        if (m && m === latestMonth) {
+        if (m && m === latestMonth && !isNaN(gpt) && gpt > 0) {
           monthGpt += gpt;
           monthCnt++;
+          // 累加该笔抽奖对应的游戏价格（F列），用作"本月总价值"
+          const gPrice = gamePriceCol ? _parseNum(r[gamePriceCol]) : NaN;
+          if (!isNaN(gPrice) && gPrice > 0) monthGameValueGpt += gPrice;
         }
       }
-      out.blindBoxRev = totalGpt / 10;          // 元
-      out.blindBoxMonthRev = monthGpt / 10;
-      out.blindBoxCount = totalCnt;
+      out.blindBoxMonthRev = monthGpt / 10;             // 本月消费额（元）
+      out.blindBoxMonthGameValue = monthGameValueGpt / 10;  // 本月抽到的游戏总价值（元）
       out.blindBoxMonthCount = monthCnt;
       out.blindBoxMonthLabel = latestMonth ? latestMonth.replace(/(\d{4})(\d{2})/, '$1年$2月') : '';
     }
@@ -1705,26 +1705,21 @@ var _BUILTIN_TABLES=[
       html += '</div>';
     }
 
-    // ── 活动销售额（仅从「盲盒活动」「永久卡」sheet 计算）──
-    if (d.blindBoxRev != null || d.permCardTotalCount != null) {
-      html += '<div class="dash-section"><div class="dash-section-title">🎰 活动销售额 <span style="font-weight:400;font-size:12px;color:var(--text3)">（仅来自盲盒活动 + 永久卡 sheet）</span></div>';
+    // ── 活动销售额（仅从「盲盒活动」「永久卡」sheet 计算，只显示本月相关数据）──
+    if (d.blindBoxMonthRev != null || d.permCardMonthCount != null) {
+      const actLabel = d.blindBoxMonthLabel || d.permCardMonthLabel || '';
+      html += '<div class="dash-section"><div class="dash-section-title">🎰 活动销售额' + (actLabel ? ' <span style="font-weight:400;font-size:12px;color:var(--text3)">(' + h(actLabel) + ')</span>' : '') + '</div>';
       html += '<div class="dash-grid" style="margin-bottom:0">';
-      if (d.blindBoxRev != null) {
-        html += '<div class="dash-card c-amber"><div class="dash-label">盲盒活动累计销售额</div><div class="dash-value" style="font-size:20px">¥' + _fmtMoney(d.blindBoxRev) + '</div><div class="dash-sub">' + _fmtInt(d.blindBoxCount || 0) + ' 笔抽奖记录</div></div>';
-        if (d.blindBoxMonthRev != null) {
-          html += '<div class="dash-card c-amber"><div class="dash-label">盲盒本月销售额</div><div class="dash-value" style="font-size:20px">¥' + _fmtMoney(d.blindBoxMonthRev) + '</div><div class="dash-sub">' + h(d.blindBoxMonthLabel || '') + ' · ' + _fmtInt(d.blindBoxMonthCount || 0) + ' 笔</div></div>';
-        }
+      if (d.blindBoxMonthRev != null) {
+        html += '<div class="dash-card c-amber"><div class="dash-label">盲盒本月消费额</div><div class="dash-value">¥' + _fmtMoney(d.blindBoxMonthRev) + '</div><div class="dash-sub">' + _fmtInt(d.blindBoxMonthCount || 0) + ' 笔抽奖</div></div>';
       }
-      if (d.permCardTotalCount != null) {
-        html += '<div class="dash-card c-purple"><div class="dash-label">永久卡累计购买</div><div class="dash-value" style="font-size:20px">' + _fmtInt(d.permCardTotalCount) + ' 张</div>';
-        const types = Object.keys(d.permCardByType || {});
-        if (types.length) {
-          html += '<div class="dash-sub">' + types.map(t => h(t) + ' ' + d.permCardByType[t].total).join(' · ') + '</div>';
-        }
-        html += '</div>';
-        if (d.permCardMonthCount != null) {
-          html += '<div class="dash-card c-purple"><div class="dash-label">永久卡本月购买</div><div class="dash-value" style="font-size:20px">' + _fmtInt(d.permCardMonthCount) + ' 张</div><div class="dash-sub">' + h(d.permCardMonthLabel || '') + '</div></div>';
-        }
+      if (d.blindBoxMonthGameValue != null) {
+        html += '<div class="dash-card c-amber"><div class="dash-label">盲盒游戏本月总价值</div><div class="dash-value">¥' + _fmtMoney(d.blindBoxMonthGameValue) + '</div><div class="dash-sub">本月抽到游戏原价合计</div></div>';
+      }
+      if (d.permCardMonthValue != null) {
+        html += '<div class="dash-card c-purple"><div class="dash-label">永久卡本月消费价值</div><div class="dash-value">¥' + _fmtMoney(d.permCardMonthValue) + '</div><div class="dash-sub">' + _fmtInt(d.permCardMonthCount || 0) + ' 张永久卡</div></div>';
+      } else if (d.permCardMonthCount != null) {
+        html += '<div class="dash-card c-purple"><div class="dash-label">永久卡本月消费价值</div><div class="dash-value" style="font-size:14px;color:var(--text3)">⚠ 待配置卡价</div><div class="dash-sub">本月购买 ' + _fmtInt(d.permCardMonthCount) + ' 张（需提供单价）</div></div>';
       }
       html += '</div></div>';
     }
