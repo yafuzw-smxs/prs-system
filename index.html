@@ -1291,18 +1291,47 @@ var _BUILTIN_TABLES=[
       out.blindBoxMonthLabel = latestMonth ? latestMonth.replace(/(\d{4})(\d{2})/, '$1年$2月') : '';
     }
 
-    // 1b. 永久卡：每行一笔购买（无金额列，按类型计数）
-    //     A列日期判定本月，E列「特权会员」按类型分组
+    // 1b. 永久卡：每行一笔下载，C列「游戏」名称（含括号内ID），
+    //     从单机/网游消费数据建价格查找表，本月消费价值 = 本月所有下载游戏的价格之和÷10
     const permSheet = _findSheet(tbl, '永久卡');
     if (permSheet && permSheet.data.length > 1) {
       const hdr = permSheet.data[0];
       const cols = permSheet.columns || [];
-      let dateCol = null, typeCol = null;
+      let dateCol = null, gameCol = null, typeCol = null;
       for (const c of cols) {
         const v = String(hdr[c] || '');
         if (!dateCol && /^日期$|购买日期/.test(v)) dateCol = c;
+        if (!gameCol && /^游戏$|游戏名/.test(v)) gameCol = c;
         if (!typeCol && /特权会员|会员类型|卡类型/.test(v)) typeCol = c;
       }
+      // 建立价格查找表：name→price(G点) + id→price(G点)，从「单机游戏消费数据」H列
+      const priceByName = {};
+      const priceById = {};
+      const buildPrice = (consumeS) => {
+        if (!consumeS || consumeS.data.length < 2) return;
+        const ch = consumeS.data[0];
+        const cc = consumeS.columns || [];
+        let pCol = null, idCol = null, nameCol = null;
+        for (const c of cc) {
+          const v = String(ch[c] || '');
+          if (!pCol && /价格|售价|单价/.test(v)) pCol = c;
+          if (!idCol && /^游戏ID$|^ID$/.test(v)) idCol = c;
+          if (!nameCol && /游戏名称|游戏名/.test(v)) nameCol = c;
+        }
+        if (!pCol) return;
+        for (let i = 1; i < consumeS.data.length; i++) {
+          const r = consumeS.data[i];
+          const p = _parseNum(r[pCol]);
+          if (isNaN(p) || p <= 0) continue;
+          const nm = nameCol ? String(r[nameCol] || '').trim() : '';
+          const id = idCol ? String(r[idCol] || '').trim() : '';
+          if (nm) priceByName[nm] = p;
+          if (id) priceById[id] = p;
+        }
+      };
+      buildPrice(_findSheet(tbl, '单机游戏消费数据'));
+      buildPrice(_findSheet(tbl, '网络游戏消费数据'));
+
       // 找最新月份
       let latestMonth = '';
       for (let i = 1; i < permSheet.data.length; i++) {
@@ -1310,24 +1339,37 @@ var _BUILTIN_TABLES=[
         const m = dateCol ? _parseDateMonth(String(r[dateCol] || '')) : null;
         if (m && m > latestMonth) latestMonth = m;
       }
-      const byType = {};         // { type: { total, month } }
-      let totalCnt = 0, monthCnt = 0;
+      let monthCnt = 0;
+      let monthValueGpt = 0;
+      let matchCnt = 0, missCnt = 0;
+      const missSamples = [];
       for (let i = 1; i < permSheet.data.length; i++) {
         const r = permSheet.data[i];
-        const type = typeCol ? String(r[typeCol] || '').trim() : '未分类';
-        if (!type) continue;
         const m = dateCol ? _parseDateMonth(String(r[dateCol] || '')) : null;
-        if (!byType[type]) byType[type] = { total: 0, month: 0 };
-        byType[type].total++;
-        totalCnt++;
-        if (m && m === latestMonth) {
-          byType[type].month++;
-          monthCnt++;
+        if (!m || m !== latestMonth) continue;
+        monthCnt++;
+        const rawGame = gameCol ? String(r[gameCol] || '').trim() : '';
+        if (!rawGame) { missCnt++; if (missSamples.length < 3) missSamples.push(rawGame); continue; }
+        // 提取括号内 ID（兼容半角/全角）+ 去掉括号得纯名字
+        const idMatch = rawGame.match(/[（(](\d+)[）)]/);
+        const id = idMatch ? idMatch[1] : '';
+        const cleanName = rawGame.replace(/[（(]\d+[）)]/g, '').trim();
+        let price = NaN;
+        if (id && priceById[id] != null) price = priceById[id];
+        else if (cleanName && priceByName[cleanName] != null) price = priceByName[cleanName];
+        if (!isNaN(price) && price > 0) {
+          monthValueGpt += price;
+          matchCnt++;
+        } else {
+          missCnt++;
+          if (missSamples.length < 3) missSamples.push(rawGame);
         }
       }
-      out.permCardTotalCount = totalCnt;
       out.permCardMonthCount = monthCnt;
-      out.permCardByType = byType;   // { '尊享会员永久卡': {total, month}, ... }
+      out.permCardMonthValue = monthCnt > 0 ? monthValueGpt / 10 : null; // 元
+      out.permCardMonthMatched = matchCnt;
+      out.permCardMonthMissed = missCnt;
+      out.permCardMonthMissSamples = missSamples;
       out.permCardMonthLabel = latestMonth ? latestMonth.replace(/(\d{4})(\d{2})/, '$1年$2月') : '';
     }
 
@@ -1717,9 +1759,12 @@ var _BUILTIN_TABLES=[
         html += '<div class="dash-card c-amber"><div class="dash-label">盲盒游戏本月总价值</div><div class="dash-value">¥' + _fmtMoney(d.blindBoxMonthGameValue) + '</div><div class="dash-sub">本月抽到游戏原价合计</div></div>';
       }
       if (d.permCardMonthValue != null) {
-        html += '<div class="dash-card c-purple"><div class="dash-label">永久卡本月消费价值</div><div class="dash-value">¥' + _fmtMoney(d.permCardMonthValue) + '</div><div class="dash-sub">' + _fmtInt(d.permCardMonthCount || 0) + ' 张永久卡</div></div>';
-      } else if (d.permCardMonthCount != null) {
-        html += '<div class="dash-card c-purple"><div class="dash-label">永久卡本月消费价值</div><div class="dash-value" style="font-size:14px;color:var(--text3)">⚠ 待配置卡价</div><div class="dash-sub">本月购买 ' + _fmtInt(d.permCardMonthCount) + ' 张（需提供单价）</div></div>';
+        const matchRate = d.permCardMonthCount ? (d.permCardMonthMatched / d.permCardMonthCount * 100).toFixed(0) : '0';
+        let subTxt = _fmtInt(d.permCardMonthCount) + ' 次下载 · 已匹配 ' + d.permCardMonthMatched + '/' + d.permCardMonthCount + ' (' + matchRate + '%)';
+        if (d.permCardMonthMissed > 0 && d.permCardMonthMissSamples && d.permCardMonthMissSamples.length) {
+          subTxt += ' · 未匹配示例: ' + d.permCardMonthMissSamples.slice(0, 1).join(',');
+        }
+        html += '<div class="dash-card c-purple"><div class="dash-label">永久卡本月消费价值</div><div class="dash-value">¥' + _fmtMoney(d.permCardMonthValue) + '</div><div class="dash-sub">' + h(subTxt) + '</div></div>';
       }
       html += '</div></div>';
     }
