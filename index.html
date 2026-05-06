@@ -1285,9 +1285,9 @@ var _BUILTIN_TABLES=[
           monthGpt += gpt * times;
           monthCnt++;
           monthOpenTotal += times;
-          // 该笔抽奖抽到的游戏数 = 开箱次数；价值 = 单价 × 次数
+          // 游戏价值每行只算一次（不乘开箱次数）
           const gPrice = gamePriceCol ? _parseNum(r[gamePriceCol]) : NaN;
-          if (!isNaN(gPrice) && gPrice > 0) monthGameValueGpt += gPrice * times;
+          if (!isNaN(gPrice) && gPrice > 0) monthGameValueGpt += gPrice;
         }
       }
       out.blindBoxMonthRev = monthGpt / 10;                  // 本月消费额（元，消耗G点×次数 ÷10）
@@ -1763,7 +1763,7 @@ var _BUILTIN_TABLES=[
         html += '<div class="dash-card c-amber"><div class="dash-label">盲盒本月消费额</div><div class="dash-value">¥' + _fmtMoney(d.blindBoxMonthRev) + '</div><div class="dash-sub">' + opensTxt + '（消耗×次数）</div></div>';
       }
       if (d.blindBoxMonthGameValue != null) {
-        html += '<div class="dash-card c-amber"><div class="dash-label">盲盒游戏本月总价值</div><div class="dash-value">¥' + _fmtMoney(d.blindBoxMonthGameValue) + '</div><div class="dash-sub">单价×开箱次数 累加</div></div>';
+        html += '<div class="dash-card c-amber"><div class="dash-label">盲盒游戏本月总价值</div><div class="dash-value">¥' + _fmtMoney(d.blindBoxMonthGameValue) + '</div><div class="dash-sub">每笔抽奖游戏单价累加</div></div>';
       }
       if (d.permCardMonthValue != null) {
         const matchRate = d.permCardMonthCount ? (d.permCardMonthMatched / d.permCardMonthCount * 100).toFixed(0) : '0';
