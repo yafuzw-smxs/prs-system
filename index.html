@@ -1580,20 +1580,46 @@ var _BUILTIN_TABLES=[
       }
     }
 
-    // ── 5. 游戏总数：从消费数据 sheet 行数统计（不再依赖上架游戏ID列表）──
+    // ── 5. 游戏总数：从消费数据 sheet 行数统计，排除"已下架/下架"状态 ──
+    const _findStatusCol = (sh) => {
+      if (!sh || sh.data.length < 1) return null;
+      const h = sh.data[0]; const cs = sh.columns || [];
+      for (const c of cs) {
+        const v = String(h[c] || '');
+        if (/上架状态|状态/.test(v)) return c;
+      }
+      return null;
+    };
+    // 已下架判定：包含"下架"字样且不是纯"上架"
+    const _isDelisted = (s) => {
+      const v = String(s || '').trim();
+      if (!v) return false;
+      if (/^上架$/.test(v)) return false;
+      return /下架/.test(v);
+    };
     if (consumeSheet && consumeSheet.data.length > 1) {
-      let cnt = 0;
+      const statusCol = _findStatusCol(consumeSheet);
+      let cnt = 0, delisted = 0;
       for (let i = 1; i < consumeSheet.data.length; i++) {
-        if (String(consumeSheet.data[i].B || '').trim()) cnt++;
+        const r = consumeSheet.data[i];
+        if (!String(r.B || '').trim()) continue;
+        if (statusCol && _isDelisted(r[statusCol])) { delisted++; continue; }
+        cnt++;
       }
       out.standaloneCount = cnt;
+      out.standaloneDelistedCount = delisted;
     }
     if (netSheet && netSheet.data.length > 1) {
-      let cnt = 0;
+      const statusCol = _findStatusCol(netSheet);
+      let cnt = 0, delisted = 0;
       for (let i = 1; i < netSheet.data.length; i++) {
-        if (String(netSheet.data[i].B || netSheet.data[i].A || '').trim()) cnt++;
+        const r = netSheet.data[i];
+        if (!String(r.B || r.A || '').trim()) continue;
+        if (statusCol && _isDelisted(r[statusCol])) { delisted++; continue; }
+        cnt++;
       }
       out.networkCount = cnt;
+      out.networkDelistedCount = delisted;
     }
 
     return out;
@@ -1657,10 +1683,11 @@ var _BUILTIN_TABLES=[
       const wkLabel = d.standaloneLatestWeekLabel ? ' <span style="font-weight:400;font-size:12px;color:var(--text3)">(' + h(d.standaloneLatestWeekLabel) + ' 当周)</span>' : '';
       html += '<div class="dash-section"><div class="dash-section-title">🎮 单机游戏' + wkLabel + '</div>';
       html += '<div class="dash-grid">';
-      // 单机游戏总数（移自综合概览）
+      // 单机游戏总数（仅含上架状态，已下架不计入）
       if (d.standaloneCount || !isNaN(d.totalGames)) {
         const gamesVal = d.standaloneCount ? d.standaloneCount + ' 款' : (!isNaN(d.totalGames) ? _fmtInt(d.totalGames) + ' 款' : '—');
-        html += '<div class="dash-card c-blue"><div class="dash-label">单机游戏总数</div><div class="dash-value">' + h(gamesVal) + '</div></div>';
+        const sub = d.standaloneDelistedCount ? '已排除 ' + d.standaloneDelistedCount + ' 款下架' : '仅上架状态';
+        html += '<div class="dash-card c-blue"><div class="dash-label">单机游戏总数</div><div class="dash-value">' + h(gamesVal) + '</div><div class="dash-sub">' + h(sub) + '</div></div>';
       }
       // 本月上新（基于「单机游戏消费数据」上架时间列）
       if (d.standaloneNewThisMonth != null) {
