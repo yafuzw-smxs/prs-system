@@ -1431,7 +1431,8 @@ var _BUILTIN_TABLES=[
         let monthTotal = 0;
         let newGameCount = 0;
         let newGameMonthRev = 0;  // 本月上架的游戏在本月的销售额（元）
-        let oldGameMonthRev = 0;  // 之前已上架的游戏在本月的销售额（元）
+        let oldGameMonthRev = 0;  // 之前已上架/上架时间不明的游戏在本月的销售额（元）
+        let missingReleaseCount = 0;
         for (let i = 1; i < consumeSheet.data.length; i++) {
           const r = consumeSheet.data[i];
           // 跳过没有游戏名的空行
@@ -1447,20 +1448,24 @@ var _BUILTIN_TABLES=[
             if (!isNaN(v)) gameMonthRev += v / 10; // G点÷10=元
           }
           monthTotal += gameMonthRev;
-          // 判定新/老：上架时间在本月 → 新游戏
+          // 判定新/老：上架时间在本月 → 新游戏；
+          //          其他（之前上架，或上架时间为空/无法识别）→ 老游戏
+          // 注：本月上新仅计入有明确上架时间且在本月的游戏；
+          //     其余销售额都归入老游戏，使饼图能反映现状
           if (releaseMonth && releaseMonth === monthPfx) {
             newGameCount++;
             newGameMonthRev += gameMonthRev;
-          } else if (releaseMonth) {
+          } else {
             oldGameMonthRev += gameMonthRev;
+            if (!releaseMonth) missingReleaseCount++;
           }
-          // 没有上架时间的游戏不计入新/老，但仍计入月销售额总数
         }
         out.standaloneMonthRevenue = monthTotal;
         out.standaloneNewThisMonth = newGameCount;
         out.standaloneNewMonthRev = newGameMonthRev;
         out.standaloneOldMonthRev = oldGameMonthRev;
         out.standaloneHasReleaseCol = !!releaseCol; // 用于前端显示提示
+        out.standaloneMissingReleaseCount = missingReleaseCount;
       }
     }
 
@@ -1735,7 +1740,11 @@ var _BUILTIN_TABLES=[
         const totalNO = newRev + oldRev;
         const newPct = totalNO ? (newRev / totalNO * 100) : 0;
         const oldPct = 100 - newPct;
-        html += '<div style="margin-top:12px"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">📈 新老游戏销售额占比' + (d.standaloneMonthLabel ? '（' + h(d.standaloneMonthLabel) + '）' : '') + ' <span style="color:var(--text3)">(按上架时间区分，按周更新)</span></div>';
+        let pieHint = '按上架时间区分，按周更新';
+        if (d.standaloneMissingReleaseCount > 0) {
+          pieHint = '⚠ ' + d.standaloneMissingReleaseCount + ' 款游戏无上架时间，已暂归为老游戏';
+        }
+        html += '<div style="margin-top:12px"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">📈 新老游戏销售额占比' + (d.standaloneMonthLabel ? '（' + h(d.standaloneMonthLabel) + '）' : '') + ' <span style="color:var(--text3)">(' + h(pieHint) + ')</span></div>';
         html += '<div class="dash-pie">';
         html += '<div class="dash-pie-chart" style="background:conic-gradient(#3b82f6 0% ' + newPct.toFixed(1) + '%, #22c55e ' + newPct.toFixed(1) + '% 100%)"></div>';
         html += '<div class="dash-pie-legend">';
