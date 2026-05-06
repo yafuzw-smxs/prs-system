@@ -1491,9 +1491,8 @@ var _BUILTIN_TABLES=[
           const r = netSheet.data[i];
           const name = String(r.B || r.A || '').trim();
           const raw = _parseNum(r[latestNetWk.col]);
-          const gpts = isNaN(raw) ? 0 : raw;
-          // 网络游戏消费数据直接以元为单位，无需除以10
-          const yuan = gpts;
+          const gpts = isNaN(raw) ? 0 : raw; // 网游周列单位：G点（与单机一致）
+          const yuan = gpts / 10;             // G点÷10=元
           weekTotal += yuan;
           if (name && yuan > 0) gameWeek.push({ name, amount: yuan });
         }
@@ -1502,7 +1501,7 @@ var _BUILTIN_TABLES=[
         out.networkWeeklyTop10 = gameWeek.slice(0, 10);
       }
 
-      // 本月销售额：累加本月所有周列（按最新周所在月份）
+      // 本月销售额：累加本月所有周列（G点÷10=元，与单机一致）
       if (netWeekCols.length) {
         const monthPfx = netWeekCols[netWeekCols.length - 1].date.substring(0, 6);
         out.networkMonthLabel = monthPfx.replace(/(\d{4})(\d{2})/, '$1年$2月');
@@ -1512,8 +1511,7 @@ var _BUILTIN_TABLES=[
         for (let i = 1; i < netSheet.data.length; i++) {
           for (const wc of monthWkCols) {
             const v = _parseNum(netSheet.data[i][wc.col]);
-            // 网络游戏消费数据直接以元为单位，无需除以10
-            if (!isNaN(v)) monthTotal += v;
+            if (!isNaN(v)) monthTotal += v / 10; // G点÷10=元
           }
         }
         out.networkMonthRevenue = monthTotal;
