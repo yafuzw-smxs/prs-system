@@ -1257,14 +1257,15 @@ var _BUILTIN_TABLES=[
     if (blindSheet && blindSheet.data.length > 1) {
       const hdr = blindSheet.data[0];
       const cols = blindSheet.columns || [];
-      let timeCol = null, gptCol = null, gamePriceCol = null;
+      let timeCol = null, gptCol = null, gamePriceCol = null, openCntCol = null;
       for (const c of cols) {
         const v = String(hdr[c] || '');
         if (!timeCol && /抽奖时间|时间|日期/.test(v)) timeCol = c;
         if (!gptCol && /消耗.*G点|消耗G点/.test(v)) gptCol = c;
         if (!gamePriceCol && /游戏价格/.test(v)) gamePriceCol = c;
+        if (!openCntCol && /开箱次数|次数/.test(v)) openCntCol = c;
       }
-      let monthGpt = 0, monthCnt = 0, monthGameValueGpt = 0;
+      let monthGpt = 0, monthCnt = 0, monthGameValueGpt = 0, monthOpenTotal = 0;
       // 找"最新月份"作为本月：取所有抽奖时间里最大的月份
       let latestMonth = '';
       for (let i = 1; i < blindSheet.data.length; i++) {
@@ -1278,16 +1279,21 @@ var _BUILTIN_TABLES=[
         const gpt = gptCol ? _parseNum(r[gptCol]) : NaN;
         const m = timeCol ? _parseDateMonth(String(r[timeCol] || '')) : null;
         if (m && m === latestMonth && !isNaN(gpt) && gpt > 0) {
-          monthGpt += gpt;
+          // 每笔记录可能开了多次，需 × 开箱次数
+          let times = openCntCol ? _parseNum(r[openCntCol]) : NaN;
+          if (isNaN(times) || times <= 0) times = 1;
+          monthGpt += gpt * times;
           monthCnt++;
-          // 累加该笔抽奖对应的游戏价格（F列），用作"本月总价值"
+          monthOpenTotal += times;
+          // 该笔抽奖抽到的游戏数 = 开箱次数；价值 = 单价 × 次数
           const gPrice = gamePriceCol ? _parseNum(r[gamePriceCol]) : NaN;
-          if (!isNaN(gPrice) && gPrice > 0) monthGameValueGpt += gPrice;
+          if (!isNaN(gPrice) && gPrice > 0) monthGameValueGpt += gPrice * times;
         }
       }
-      out.blindBoxMonthRev = monthGpt / 10;             // 本月消费额（元）
-      out.blindBoxMonthGameValue = monthGameValueGpt / 10;  // 本月抽到的游戏总价值（元）
-      out.blindBoxMonthCount = monthCnt;
+      out.blindBoxMonthRev = monthGpt / 10;                  // 本月消费额（元，消耗G点×次数 ÷10）
+      out.blindBoxMonthGameValue = monthGameValueGpt / 10;   // 本月所抽游戏总价值（元，单价×次数 ÷10）
+      out.blindBoxMonthCount = monthCnt;                     // 笔数
+      out.blindBoxMonthOpens = monthOpenTotal;               // 总开箱次数
       out.blindBoxMonthLabel = latestMonth ? latestMonth.replace(/(\d{4})(\d{2})/, '$1年$2月') : '';
     }
 
@@ -1753,10 +1759,11 @@ var _BUILTIN_TABLES=[
       html += '<div class="dash-section"><div class="dash-section-title">🎰 活动销售额' + (actLabel ? ' <span style="font-weight:400;font-size:12px;color:var(--text3)">(' + h(actLabel) + ')</span>' : '') + '</div>';
       html += '<div class="dash-grid" style="margin-bottom:0">';
       if (d.blindBoxMonthRev != null) {
-        html += '<div class="dash-card c-amber"><div class="dash-label">盲盒本月消费额</div><div class="dash-value">¥' + _fmtMoney(d.blindBoxMonthRev) + '</div><div class="dash-sub">' + _fmtInt(d.blindBoxMonthCount || 0) + ' 笔抽奖</div></div>';
+        const opensTxt = d.blindBoxMonthOpens ? _fmtInt(d.blindBoxMonthOpens) + ' 次开箱' : (_fmtInt(d.blindBoxMonthCount || 0) + ' 笔');
+        html += '<div class="dash-card c-amber"><div class="dash-label">盲盒本月消费额</div><div class="dash-value">¥' + _fmtMoney(d.blindBoxMonthRev) + '</div><div class="dash-sub">' + opensTxt + '（消耗×次数）</div></div>';
       }
       if (d.blindBoxMonthGameValue != null) {
-        html += '<div class="dash-card c-amber"><div class="dash-label">盲盒游戏本月总价值</div><div class="dash-value">¥' + _fmtMoney(d.blindBoxMonthGameValue) + '</div><div class="dash-sub">本月抽到游戏原价合计</div></div>';
+        html += '<div class="dash-card c-amber"><div class="dash-label">盲盒游戏本月总价值</div><div class="dash-value">¥' + _fmtMoney(d.blindBoxMonthGameValue) + '</div><div class="dash-sub">单价×开箱次数 累加</div></div>';
       }
       if (d.permCardMonthValue != null) {
         const matchRate = d.permCardMonthCount ? (d.permCardMonthMatched / d.permCardMonthCount * 100).toFixed(0) : '0';
