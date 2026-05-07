@@ -1686,18 +1686,37 @@ var _BUILTIN_TABLES=[
         html += '<div class="dash-card c-green"><div class="dash-label">网游当月流水</div><div class="dash-value">¥' + _fmtMoney(d.networkMonthRevenue) + '</div>' + (d.networkMonthLabel ? '<div class="dash-sub">' + h(d.networkMonthLabel) + '</div>' : '') + '</div>';
       }
       html += '</div>';
-      // 网游 vs 单机 月销售占比（移自下方）
-      if (d.networkMonthRevenue != null && d.standaloneMonthRevenue != null) {
-        const totalNS = d.networkMonthRevenue + d.standaloneMonthRevenue;
-        const stPct = totalNS ? (d.standaloneMonthRevenue / totalNS * 100) : 0;
-        const netPct = 100 - stPct;
-        html += '<div style="margin-top:12px"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">⚖️ 网游 vs 单机 月销售占比' + (overviewMonthLabel ? '（' + h(overviewMonthLabel) + '）' : '') + '</div>';
-        html += '<div class="dash-pie">';
-        html += '<div class="dash-pie-chart" style="background:conic-gradient(#8b5cf6 0% ' + stPct.toFixed(1) + '%, #f59e0b ' + stPct.toFixed(1) + '% 100%)"></div>';
-        html += '<div class="dash-pie-legend">';
-        html += '<div class="dash-pie-item"><div class="dash-pie-dot" style="background:#8b5cf6"></div>单机游戏 ¥' + _fmtMoney(d.standaloneMonthRevenue) + ' (' + stPct.toFixed(1) + '%)</div>';
-        html += '<div class="dash-pie-item"><div class="dash-pie-dot" style="background:#f59e0b"></div>网络游戏 ¥' + _fmtMoney(d.networkMonthRevenue) + ' (' + netPct.toFixed(1) + '%)</div>';
-        html += '</div></div></div>';
+      // 双饼图：月销售占比 + 周销售占比 并排显示
+      const hasMonthPie = (d.networkMonthRevenue != null && d.standaloneMonthRevenue != null);
+      const hasWeekPie = (d.networkWeeklyRevenue != null && d.standaloneWeeklyRevenue != null);
+      if (hasMonthPie || hasWeekPie) {
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-top:12px">';
+        if (hasMonthPie) {
+          const totalM = d.networkMonthRevenue + d.standaloneMonthRevenue;
+          const stPctM = totalM ? (d.standaloneMonthRevenue / totalM * 100) : 0;
+          const netPctM = 100 - stPctM;
+          html += '<div><div style="font-size:12px;color:var(--text3);margin-bottom:8px">⚖️ 月销售占比' + (overviewMonthLabel ? '（' + h(overviewMonthLabel) + '）' : '') + '</div>';
+          html += '<div class="dash-pie">';
+          html += '<div class="dash-pie-chart" style="background:conic-gradient(#8b5cf6 0% ' + stPctM.toFixed(1) + '%, #f59e0b ' + stPctM.toFixed(1) + '% 100%)"></div>';
+          html += '<div class="dash-pie-legend">';
+          html += '<div class="dash-pie-item"><div class="dash-pie-dot" style="background:#8b5cf6"></div>单机游戏 ¥' + _fmtMoney(d.standaloneMonthRevenue) + ' (' + stPctM.toFixed(1) + '%)</div>';
+          html += '<div class="dash-pie-item"><div class="dash-pie-dot" style="background:#f59e0b"></div>网络游戏 ¥' + _fmtMoney(d.networkMonthRevenue) + ' (' + netPctM.toFixed(1) + '%)</div>';
+          html += '</div></div></div>';
+        }
+        if (hasWeekPie) {
+          const totalW = d.networkWeeklyRevenue + d.standaloneWeeklyRevenue;
+          const stPctW = totalW ? (d.standaloneWeeklyRevenue / totalW * 100) : 0;
+          const netPctW = 100 - stPctW;
+          const wkLbl = d.standaloneLatestWeekLabel || d.networkLatestWeekLabel || '';
+          html += '<div><div style="font-size:12px;color:var(--text3);margin-bottom:8px">⚖️ 周销售占比' + (wkLbl ? '（' + h(wkLbl) + ' 当周）' : '') + '</div>';
+          html += '<div class="dash-pie">';
+          html += '<div class="dash-pie-chart" style="background:conic-gradient(#06b6d4 0% ' + stPctW.toFixed(1) + '%, #ef4444 ' + stPctW.toFixed(1) + '% 100%)"></div>';
+          html += '<div class="dash-pie-legend">';
+          html += '<div class="dash-pie-item"><div class="dash-pie-dot" style="background:#06b6d4"></div>单机游戏 ¥' + _fmtMoney(d.standaloneWeeklyRevenue) + ' (' + stPctW.toFixed(1) + '%)</div>';
+          html += '<div class="dash-pie-item"><div class="dash-pie-dot" style="background:#ef4444"></div>网络游戏 ¥' + _fmtMoney(d.networkWeeklyRevenue) + ' (' + netPctW.toFixed(1) + '%)</div>';
+          html += '</div></div></div>';
+        }
+        html += '</div>';
       }
       html += '</div>';
     }
