@@ -608,26 +608,59 @@ var _BUILTIN_TABLES=[
       const newUpdatedAt = payload.updatedAt || '';
       // 后端时间戳没变 → 无更新
       if (newUpdatedAt && newUpdatedAt === _lastBackendUpdatedAt) return;
-      // 自己刚保存的 → 不弹提示（updatedBy 是自己 + 时间差很小）
+      // 自己刚保存的 → 静默更新（数据其实是自己的）
       const isSelfChange = payload.updatedBy && _auth.user && payload.updatedBy === _auth.user.username;
       const tables = payload.tables;
-      if (tables && tables.length) {
-        state.tables = tables;
-        _rebuildIndex();
-        _kwCache.clear();
-        bus.emit('tables:change');
-        if (!isSelfChange) {
-          console.log('[poll] 检测到 ' + (payload.updatedBy || '其他用户') + ' 的更新，已同步');
-          _showSyncToast(payload.updatedBy || '其他用户', tables.length);
-        }
+      if (!tables || !tables.length) return;
+      if (isSelfChange) {
+        // 自己的更新，直接同步本地时间戳，避免下次再触发；不重渲染（数据相同）
+        _lastBackendUpdatedAt = newUpdatedAt;
+        _lastBackendUpdatedBy = payload.updatedBy || '';
+        return;
       }
-      _lastBackendUpdatedAt = newUpdatedAt;
-      _lastBackendUpdatedBy = payload.updatedBy || '';
+      // 他人更新：不再自动覆盖本地视图，改为缓存到 _pendingSync，由用户主动应用
+      _pendingSync = {
+        tables: tables,
+        updatedAt: newUpdatedAt,
+        updatedBy: payload.updatedBy || '其他用户'
+      };
+      _showSyncBanner();
     } catch (e) {
       // 静默失败，下次再试
     } finally {
       _polling = false;
     }
+  }
+  // 缓存待同步的远端数据（不自动覆盖本地）
+  let _pendingSync = null;
+  function applyPendingSync(){
+    if (!_pendingSync) return;
+    state.tables = _pendingSync.tables;
+    _rebuildIndex();
+    _kwCache.clear();
+    bus.emit('tables:change');
+    _lastBackendUpdatedAt = _pendingSync.updatedAt;
+    _lastBackendUpdatedBy = _pendingSync.updatedBy;
+    _pendingSync = null;
+    _hideSyncBanner();
+  }
+  function _showSyncBanner(){
+    let b = document.getElementById('sync-banner');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'sync-banner';
+      b.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#2563eb;color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);z-index:9999;cursor:pointer;display:flex;align-items:center;gap:12px;max-width:360px';
+      b.addEventListener('click', applyPendingSync);
+      document.body.appendChild(b);
+    }
+    if (!_pendingSync) return;
+    b.innerHTML = '<span>🔄 <b>' + _pendingSync.updatedBy + '</b> 更新了表格</span>'
+      + '<span style="background:#fff;color:#2563eb;padding:4px 10px;border-radius:4px;font-weight:600;font-size:12px">点击应用</span>';
+    b.style.display = 'flex';
+  }
+  function _hideSyncBanner(){
+    const b = document.getElementById('sync-banner');
+    if (b) b.style.display = 'none';
   }
   function startPolling(){
     if (_pollTimer) clearInterval(_pollTimer);
@@ -668,33 +701,73 @@ var _BUILTIN_TABLES=[
   }
 
   let _saving = false;
-  function save(){
+  async function save(){
     // Only save to backend if we successfully loaded from backend first.
     // This prevents pushing stale local data that would overwrite other users' changes.
     if (!_auth || !_loadedFromBackend) {
       console.warn('[save] skipped: auth=' + !!_auth + ' loadedFromBackend=' + _loadedFromBackend);
       _dirty = false;
-      return Promise.resolve();
+      return;
+    }
+    // 关键：如果有未应用的远端更新（_pendingSync）— 说明别人改过表格但本地还没同步
+    // 此时强行 PUT 会用本地旧数据覆盖别人的改动，必须先阻止
+    if (_pendingSync) {
+      _dirty = false;
+      console.warn('[save] 阻止保存：检测到他人更新未同步，请先点击右下角"应用"按钮合并');
+      _showSaveStatus(false, state.tables.length);
+      const el = document.getElementById('save-status');
+      if (el) { el.textContent = '⚠ 保存已暂停：先应用 ' + _pendingSync.updatedBy + ' 的更新'; el.style.color = '#f59e0b'; }
+      return;
     }
     const tableCount = state.tables.length;
     const bodyStr = JSON.stringify({tables: state.tables});
-    console.log('[save] sending PUT tables=' + tableCount + ' bytes=' + bodyStr.length);
-    _dirty = false;
     _saving = true;
-    return fetch('/api/tables', {
-      method: 'PUT',
-      headers: authHeaders(),
-      body: bodyStr
-    }).then(res => {
+    try {
+      // 保存前先 GET 一次后端，确认没有别人新改过（防止本地旧数据覆盖远端新数据）
+      try {
+        const checkRes = await fetch('/api/tables', { headers: authHeaders() });
+        if (checkRes.ok) {
+          const cur = await checkRes.json();
+          if (cur.updatedAt && _lastBackendUpdatedAt && cur.updatedAt !== _lastBackendUpdatedAt) {
+            const isSelf = cur.updatedBy && _auth.user && cur.updatedBy === _auth.user.username;
+            if (!isSelf) {
+              // 后端被别人改过，缓存对方版本，阻止本次保存
+              _pendingSync = { tables: cur.tables, updatedAt: cur.updatedAt, updatedBy: cur.updatedBy || '其他用户' };
+              _showSyncBanner();
+              const el = document.getElementById('save-status');
+              if (el) { el.textContent = '⚠ 保存已暂停：' + _pendingSync.updatedBy + ' 抢先更新了表格，请先点右下角应用'; el.style.color = '#f59e0b'; }
+              console.warn('[save] 阻止：后端版本变化 ' + _lastBackendUpdatedAt + ' → ' + cur.updatedAt);
+              return;
+            }
+          }
+        }
+      } catch(e) {
+        // 网络错误：放行让后续 PUT 自己感知（但保留 dirty 留待重试）
+        console.warn('[save] 预检查失败，继续保存:', e.message);
+      }
+      console.log('[save] sending PUT tables=' + tableCount + ' bytes=' + bodyStr.length);
+      _dirty = false;
+      const res = await fetch('/api/tables', {
+        method: 'PUT', headers: authHeaders(), body: bodyStr
+      });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       console.log('[save] success tables=' + tableCount);
       _showSaveStatus(true, tableCount);
-    }).catch(err => {
+      // 保存后立刻拉一次最新 updatedAt，避免下一轮轮询误判
+      try {
+        const after = await fetch('/api/tables', { headers: authHeaders() });
+        if (after.ok) {
+          const p = await after.json();
+          _lastBackendUpdatedAt = p.updatedAt || _lastBackendUpdatedAt;
+          _lastBackendUpdatedBy = p.updatedBy || _lastBackendUpdatedBy;
+        }
+      } catch(_) {}
+    } catch (err) {
       console.error('[save] FAILED:', err);
       _showSaveStatus(false, tableCount);
-    }).finally(() => {
+    } finally {
       _saving = false;
-    });
+    }
   }
 
   function scheduleSave(){
