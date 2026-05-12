@@ -1,0 +1,50 @@
+# fly.toml — Fly.io 部署配置
+# 文档：https://fly.io/docs/reference/configuration/
+
+app = "prs-system"           # 你的 app 名，全局唯一；如果被占用，部署时改成 prs-system-<你的id>
+primary_region = "hkg"       # 香港（中国大陆访问最快）。可选：sin 新加坡、nrt 东京、lax 美西
+
+# ── 构建：用根目录的 Dockerfile ──
+[build]
+  dockerfile = "Dockerfile"
+
+# ── 环境变量（非敏感）──
+# 敏感的（如 BACKUP_TOKEN）用 `fly secrets set BACKUP_TOKEN=xxx`
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  DATA_DIR = "/app/data"
+
+# ── HTTP 服务 ──
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"   # 空闲时自动停（省机时；接到请求毫秒级恢复）
+  auto_start_machines = true
+  min_machines_running = 0      # 设 1 可避免冷启动延迟，但会一直计费
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+# ── 持久 Volume：SQLite 数据库存放点 ──
+# 创建命令：fly volumes create prs_data --size 1 --region hkg
+[[mounts]]
+  source = "prs_data"
+  destination = "/app/data"
+
+# ── 健康检查 ──
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/"
+
+# ── 默认机器规格（免费档够用）──
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

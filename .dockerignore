@@ -1,0 +1,25 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+.env.*
+.DS_Store
+*.log
+
+# 本地数据（不要打进镜像，会占空间且覆盖 Volume）
+data/
+*.db
+prs-latest.db
+prs-emergency-*.db
+
+# 本地工具（不需要部署）
+db-to-excel.js
+inspect-sheets.js
+check-perm.js
+check-newold.js
+excel-output/
+
+# 编辑器
+.vscode/
+.idea/
