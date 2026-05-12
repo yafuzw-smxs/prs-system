@@ -5,6 +5,8 @@
 
 app = 'prs-system'
 primary_region = 'nrt'
+app = "prs-system"           # 你的 app 名，全局唯一；如果被占用，部署时改成 prs-system-<你的id>
+primary_region = "nrt"       # 东京（对中国大陆访问最快的可用区）。可选：sin 新加坡、lax 美西
 
 [build]
   dockerfile = 'Dockerfile'
