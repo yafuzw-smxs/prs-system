@@ -169,36 +169,6 @@ app.get('/api/emergency-backup', (req, res) => {
   res.download(dbPath, `prs-emergency-${date}.db`);
 });
 
-// ── API: 一次性数据库恢复接口（用 BACKUP_TOKEN 鉴权）──
-// 用法：curl -X POST -H "Content-Type: application/octet-stream" \
-//         --data-binary @prs.db \
-//         "https://prs-system.fly.dev/api/admin/restore-db?token=YOUR_TOKEN"
-// 服务器把上传内容写入 /app/data/prs-staged.db，然后 process.exit(0)
-// db.js 的 init() 在启动时若发现 staged 文件，会先把它换成 prs.db 再加载
-app.post('/api/admin/restore-db',
-  express.raw({ type: '*/*', limit: '100mb' }),
-  (req, res) => {
-    const secret = process.env.BACKUP_TOKEN;
-    if (!secret) return res.status(503).json({ error: '未配置 BACKUP_TOKEN' });
-    if (req.query.token !== secret) return res.status(401).json({ error: 'token 错误' });
-    if (!req.body || !req.body.length) return res.status(400).json({ error: '请求体为空，请用 --data-binary @file.db' });
-    const fs = require('fs');
-    const stagedPath = path.join(process.env.DATA_DIR || path.join(__dirname, 'data'), 'prs-staged.db');
-    try {
-      fs.writeFileSync(stagedPath, req.body);
-      console.log('[restore] 已写入 staged 文件:', stagedPath, '大小:', req.body.length);
-      res.json({ ok: true, size: req.body.length, msg: '已上传，2秒后进程退出，Fly 会自动重启并加载新数据' });
-      setTimeout(() => {
-        console.log('[restore] 主动退出进程，等待 Fly 重启加载新数据');
-        process.exit(0);
-      }, 2000);
-    } catch (e) {
-      console.error('[restore] 写入失败:', e.message);
-      res.status(500).json({ error: '写入失败: ' + e.message });
-    }
-  }
-);
-
 // ── Start (async for sql.js init) ──
 const PORT = process.env.PORT || 3000;
 
