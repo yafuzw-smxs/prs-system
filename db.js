@@ -17,9 +17,22 @@ async function init() {
   console.log('[DB] 文件已存在:', fs.existsSync(DB_PATH));
   if (process.env.RAILWAY_VOLUME_MOUNT_PATH) {
     console.log('[DB] Railway Volume 挂载路径:', process.env.RAILWAY_VOLUME_MOUNT_PATH);
+  } else if (process.env.FLY_APP_NAME) {
+    console.log('[DB] Fly.io 应用:', process.env.FLY_APP_NAME);
   } else {
-    console.warn('[DB] 警告: 未检测到 Railway Volume，数据将存储在临时文件系统，重启后会丢失！');
-    console.warn('[DB] 解决方法: 在 Railway 控制台为该服务添加 Volume，挂载路径设为 /app/data');
+    console.warn('[DB] 警告: 未检测到 Volume，数据将存储在临时文件系统，重启后会丢失！');
+  }
+
+  // 检测一次性恢复用的 staged 文件，存在则替换 prs.db
+  const stagedPath = path.join(DATA_DIR, 'prs-staged.db');
+  if (fs.existsSync(stagedPath)) {
+    console.log('[DB] 检测到 staged 恢复文件，准备替换 prs.db');
+    try {
+      fs.renameSync(stagedPath, DB_PATH);
+      console.log('[DB] 已将 staged 文件替换为 prs.db');
+    } catch (e) {
+      console.error('[DB] staged 替换失败:', e.message);
+    }
   }
 
   const SQL = await initSqlJs();
